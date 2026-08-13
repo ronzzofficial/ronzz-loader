@@ -316,7 +316,7 @@ local function FormatApiError(
             "This Roblox account is not linked to this key.",
 
         product_not_allowed =
-            "This key cannot access ZANJI V2.",
+            "This key cannot access ZanjiHub.",
 
         invalid_access_token =
             "The temporary access token was rejected.",
@@ -917,7 +917,7 @@ local function CreateKeyWindow(
         Enum.Font.GothamBold
 
     title.Text =
-        "ZANJI V2 PREMIUM ACCESS"
+        "ZANJIHUB PREMIUM ACCESS"
 
     title.TextColor3 =
         Color3.fromRGB(
