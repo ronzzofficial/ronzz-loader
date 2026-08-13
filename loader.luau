@@ -1,67 +1,32 @@
 --==================================================
 -- ZANJI PUBLIC LOADER
--- ZANJIHUB STYLE LOADER
+-- Put this file in your public GitHub repository.
+-- The actual ZANJI source is never stored in this file.
 --==================================================
 
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 local CoreGui = game:GetService("CoreGui")
-local TweenService = game:GetService("TweenService")
 
 local LocalPlayer =
     Players.LocalPlayer
     or Players.PlayerAdded:Wait()
 
-local API =
-    "https://zanji-license-api.ronzz191002.workers.dev"
-
-local PRODUCT =
-    "zanji_v2"
-
-local SOURCE_ROUTE =
-    "/v1/source/zanji_v2"
-
-local KEY_FILE =
-    "ZANJI_Key.txt"
-
 --==================================================
--- COLORS
+-- LEGACY ALLOWED PLACE IDS
 --==================================================
 
-local COLORS = {
-    Background = Color3.fromRGB(7, 7, 12),
-    Sidebar = Color3.fromRGB(9, 9, 15),
-    Panel = Color3.fromRGB(10, 10, 17),
-    Card = Color3.fromRGB(10, 10, 17),
+local LEGACY_ALLOWED_PLACE_IDS = {
+    [126884695634066] =
+        true,
 
-    Input = Color3.fromRGB(12, 12, 21),
-    InputHover = Color3.fromRGB(16, 14, 27),
-
-    Border = Color3.fromRGB(72, 45, 118),
-    BorderSoft = Color3.fromRGB(45, 32, 72),
-
-    Purple = Color3.fromRGB(154, 82, 255),
-    PurpleBright = Color3.fromRGB(174, 100, 255),
-    PurpleDark = Color3.fromRGB(105, 54, 175),
-
-    White = Color3.fromRGB(238, 238, 245),
-    Text = Color3.fromRGB(220, 220, 230),
-    Muted = Color3.fromRGB(125, 125, 140),
-    Muted2 = Color3.fromRGB(90, 90, 105),
-
-    Success = Color3.fromRGB(130, 255, 175),
-    Error = Color3.fromRGB(255, 105, 125),
+    [129954712878723] =
+        true,
 }
 
 --==================================================
--- HELPERS
+-- ENVIRONMENT
 --==================================================
-
-local function Clean(value)
-    return tostring(value or "")
-        :gsub("^%s+", "")
-        :gsub("%s+$", "")
-end
 
 local function GetEnvironment()
     if type(getgenv) == "function" then
@@ -77,10 +42,71 @@ end
 
 local Environment = GetEnvironment()
 
+--==================================================
+-- EXECUTE ONCE PER JOB
+--==================================================
+
+local existingLoaderRuntime =
+    Environment.ZANJI_LOADER_RUNTIME
+
+if type(existingLoaderRuntime) == "table"
+and existingLoaderRuntime.JobId == game.JobId
+and (
+    existingLoaderRuntime.Loading == true
+    or existingLoaderRuntime.Loaded == true
+) then
+
+    warn(
+        "[ZANJI]",
+        "ZANJI is already loading or loaded.",
+        "Channel:",
+        tostring(
+            existingLoaderRuntime.Channel
+            or "unknown"
+        )
+    )
+
+    return
+end
+
+Environment.ZANJI_LOADER_RUNTIME = {
+    JobId = game.JobId,
+    Loading = true,
+    Loaded = false,
+    Channel = "public",
+}
+
+local API =
+    "https://zanji-license-api.ronzz191002.workers.dev"
+
+local PRODUCT =
+    "zanji_v2"
+
+local SOURCE_ROUTE =
+    "/v1/source/zanji_v2"
+
+local KEY_FILE =
+    "ZANJI_Key.txt"
+
+--==================================================
+-- CLEAN
+--==================================================
+
+local function Clean(value)
+    return tostring(value or "")
+        :gsub("^%s+", "")
+        :gsub("%s+$", "")
+end
+
+--==================================================
+-- REQUEST
+--==================================================
+
 local function GetRequestFunction()
 
     if type(syn) == "table"
     and type(syn.request) == "function" then
+
         return syn.request
     end
 
@@ -94,6 +120,7 @@ local function GetRequestFunction()
 
     if type(fluxus) == "table"
     and type(fluxus.request) == "function" then
+
         return fluxus.request
     end
 
@@ -110,21 +137,27 @@ end
 
 local function SendRequest(options)
 
-    local requestFunction = GetRequestFunction()
+    local requestFunction =
+        GetRequestFunction()
 
     if type(requestFunction) ~= "function" then
+
         return nil,
             "Your executor does not support request/http_request."
     end
 
     local ok, response =
-        pcall(requestFunction, options)
+        pcall(
+            requestFunction,
+            options
+        )
 
     if not ok then
         return nil, tostring(response)
     end
 
     if type(response) == "string" then
+
         return {
             Success = true,
             StatusCode = 200,
@@ -133,6 +166,7 @@ local function SendRequest(options)
     end
 
     if type(response) ~= "table" then
+
         return nil,
             "Executor returned an invalid HTTP response."
     end
@@ -146,9 +180,11 @@ local function SendRequest(options)
             or 0
         ) or 0
 
-    local success = response.Success
+    local success =
+        response.Success
 
     if success == nil then
+
         success =
             statusCode >= 200
             and statusCode < 300
@@ -157,6 +193,7 @@ local function SendRequest(options)
     return {
         Success = success == true,
         StatusCode = statusCode,
+
         Body =
             tostring(
                 response.Body
@@ -168,24 +205,37 @@ local function SendRequest(options)
     }
 end
 
+--==================================================
+-- JSON
+--==================================================
+
 local function DecodeJson(body)
 
     if type(body) ~= "string"
     or body == "" then
+
         return nil
     end
 
     local ok, result =
         pcall(function()
-            return HttpService:JSONDecode(body)
+
+            return HttpService:
+                JSONDecode(body)
         end)
 
-    if ok and type(result) == "table" then
+    if ok
+    and type(result) == "table" then
+
         return result
     end
 
     return nil
 end
+
+--==================================================
+-- KEY FILE
+--==================================================
 
 local function ReadSavedKey()
 
@@ -194,7 +244,10 @@ local function ReadSavedKey()
     end
 
     local ok, value =
-        pcall(readfile, KEY_FILE)
+        pcall(
+            readfile,
+            KEY_FILE
+        )
 
     if not ok then
         return ""
@@ -223,9 +276,13 @@ end
 -- API ERROR
 --==================================================
 
-local function FormatApiError(decoded, fallback)
+local function FormatApiError(
+    decoded,
+    fallback
+)
 
     if type(decoded) ~= "table" then
+
         return tostring(
             fallback
             or "Unknown API error."
@@ -297,14 +354,16 @@ local function FormatApiError(decoded, fallback)
 end
 
 --==================================================
--- LICENSE ACTIVATION
+-- ACTIVATE KEY
 --==================================================
 
 local function ActivateKey(key)
 
-    key = Clean(key):upper()
+    key =
+        Clean(key):upper()
 
     if key == "" then
+
         return nil,
             "Enter your ZANJI Premium key."
     end
@@ -317,17 +376,24 @@ local function ActivateKey(key)
             Product = PRODUCT,
 
             RobloxUserId =
-                tonumber(LocalPlayer.UserId)
-                or 0,
+                tonumber(
+                    LocalPlayer.UserId
+                ) or 0,
 
             RobloxUsername =
-                tostring(LocalPlayer.Name),
+                tostring(
+                    LocalPlayer.Name
+                ),
 
             PlaceId =
-                tostring(game.PlaceId),
+                tostring(
+                    game.PlaceId
+                ),
 
             UniverseId =
-                tostring(game.GameId),
+                tostring(
+                    game.GameId
+                ),
         })
 
     local response, requestError =
@@ -340,6 +406,7 @@ local function ActivateKey(key)
             Method = "POST",
 
             Headers = {
+
                 ["Content-Type"] =
                     "application/json",
 
@@ -357,13 +424,16 @@ local function ActivateKey(key)
         })
 
     if not response then
+
         return nil,
             "Activation request failed: "
             .. tostring(requestError)
     end
 
     local decoded =
-        DecodeJson(response.Body)
+        DecodeJson(
+            response.Body
+        )
 
     if not response.Success
     or type(decoded) ~= "table"
@@ -374,7 +444,9 @@ local function ActivateKey(key)
                 decoded,
 
                 "Activation failed with HTTP "
-                .. tostring(response.StatusCode)
+                .. tostring(
+                    response.StatusCode
+                )
             )
     end
 
@@ -386,6 +458,7 @@ local function ActivateKey(key)
         )
 
     if token == "" then
+
         return nil,
             "The API did not return an access token."
     end
@@ -397,7 +470,7 @@ local function ActivateKey(key)
 end
 
 --==================================================
--- DOWNLOAD PRIVATE SOURCE
+-- DOWNLOAD SOURCE
 --==================================================
 
 local function DownloadSource(session)
@@ -415,7 +488,9 @@ local function DownloadSource(session)
 
                 ["Authorization"] =
                     "Bearer "
-                    .. tostring(session.Token),
+                    .. tostring(
+                        session.Token
+                    ),
 
                 ["Accept"] =
                     "text/plain",
@@ -429,25 +504,35 @@ local function DownloadSource(session)
         })
 
     if not response then
+
         return nil,
             "Source request failed: "
             .. tostring(requestError)
     end
 
     if not response.Success then
+
         return nil,
             FormatApiError(
-                DecodeJson(response.Body),
+                DecodeJson(
+                    response.Body
+                ),
 
                 "Source request failed with HTTP "
-                .. tostring(response.StatusCode)
+                .. tostring(
+                    response.StatusCode
+                )
             )
     end
 
     local source =
-        tostring(response.Body or "")
+        tostring(
+            response.Body
+            or ""
+        )
 
     if source == "" then
+
         return nil,
             "The private source was empty."
     end
@@ -455,7 +540,11 @@ local function DownloadSource(session)
     local marker =
         "-- ZANJI PRIVATE SOURCE"
 
-    if source:sub(1, #marker) ~= marker then
+    if source:sub(
+        1,
+        #marker
+    ) ~= marker then
+
         return nil,
             "The private source marker is missing."
     end
@@ -483,14 +572,19 @@ end
 local function InstallAuth(session)
 
     local activation =
-        session.Activation or {}
+        session.Activation
+        or {}
 
     local features = {}
 
-    if type(activation.features) == "table" then
+    if type(
+        activation.features
+    ) == "table" then
 
         for name, enabled
-        in pairs(activation.features) do
+        in pairs(
+            activation.features
+        ) do
 
             features[name] =
                 enabled == true
@@ -566,6 +660,7 @@ local function CompileAndRun(source)
         or load
 
     if type(compiler) ~= "function" then
+
         return false,
             "loadstring/load is unavailable."
     end
@@ -594,11 +689,17 @@ local function CompileAndRun(source)
 
         return false,
             "Runtime failed: "
-            .. tostring(runError)
+            .. tostring(
+                runError
+            )
     end
 
     return true
 end
+
+--==================================================
+-- RUN WITH KEY
+--==================================================
 
 local function RunWithKey(key)
 
@@ -606,6 +707,7 @@ local function RunWithKey(key)
         ActivateKey(key)
 
     if not session then
+
         return false,
             activationError
     end
@@ -616,6 +718,7 @@ local function RunWithKey(key)
     session.Token = nil
 
     if not source then
+
         return false,
             sourceError
     end
@@ -624,11 +727,34 @@ local function RunWithKey(key)
 
     SaveKey(key)
 
-    return CompileAndRun(source)
+    local success, errorMessage =
+        CompileAndRun(source)
+
+    if success then
+
+        Environment.ZANJI_LOADER_RUNTIME = {
+            JobId = game.JobId,
+            Loading = false,
+            Loaded = true,
+            Channel = "public",
+        }
+
+    else
+
+        -- Allow retry if loading failed.
+        Environment.ZANJI_LOADER_RUNTIME = {
+            JobId = game.JobId,
+            Loading = false,
+            Loaded = false,
+            Channel = "public",
+        }
+    end
+
+    return success, errorMessage
 end
 
 --==================================================
--- UI HELPERS
+-- UI PARENT
 --==================================================
 
 local function GetUiParent()
@@ -640,6 +766,7 @@ local function GetUiParent()
 
         if ok
         and typeof(result) == "Instance" then
+
             return result
         end
     end
@@ -649,230 +776,33 @@ local function GetUiParent()
     end
 
     return LocalPlayer:
-        WaitForChild("PlayerGui")
+        WaitForChild(
+            "PlayerGui"
+        )
 end
 
-local function AddCorner(instance, radius)
+--==================================================
+-- UI CORNER
+--==================================================
+
+local function AddCorner(
+    instance,
+    radius
+)
 
     local corner =
-        Instance.new("UICorner")
+        Instance.new(
+            "UICorner"
+        )
 
     corner.CornerRadius =
-        UDim.new(0, radius)
-
-    corner.Parent = instance
-
-    return corner
-end
-
-local function AddStroke(
-    instance,
-    color,
-    thickness,
-    transparency
-)
-
-    local stroke =
-        Instance.new("UIStroke")
-
-    stroke.Color = color
-    stroke.Thickness = thickness or 1
-    stroke.Transparency =
-        transparency or 0
-
-    stroke.Parent = instance
-
-    return stroke
-end
-
-local function CreateLabel(
-    parent,
-    text,
-    size,
-    position,
-    font,
-    textSize,
-    color
-)
-
-    local label =
-        Instance.new("TextLabel")
-
-    label.BackgroundTransparency = 1
-
-    label.Position = position
-    label.Size = size
-
-    label.Font =
-        font
-        or Enum.Font.Gotham
-
-    label.Text =
-        tostring(text or "")
-
-    label.TextSize =
-        textSize
-        or 13
-
-    label.TextColor3 =
-        color
-        or COLORS.Text
-
-    label.TextXAlignment =
-        Enum.TextXAlignment.Left
-
-    label.TextYAlignment =
-        Enum.TextYAlignment.Center
-
-    label.Parent = parent
-
-    return label
-end
-
-local function CreateLine(parent, position)
-
-    local line =
-        Instance.new("Frame")
-
-    line.Position = position
-
-    line.Size =
-        UDim2.new(
-            1,
+        UDim.new(
             0,
-            0,
-            1
+            radius
         )
 
-    line.BackgroundColor3 =
-        COLORS.BorderSoft
-
-    line.BorderSizePixel = 0
-
-    line.Parent = parent
-
-    return line
-end
-
---==================================================
--- SIDEBAR ITEM
---==================================================
-
-local function CreateSidebarItem(
-    parent,
-    text,
-    icon,
-    y,
-    selected
-)
-
-    local item =
-        Instance.new("Frame")
-
-    item.Position =
-        UDim2.fromOffset(
-            10,
-            y
-        )
-
-    item.Size =
-        UDim2.new(
-            1,
-            -20,
-            0,
-            38
-        )
-
-    item.BackgroundColor3 =
-        selected
-        and Color3.fromRGB(
-            24,
-            16,
-            39
-        )
-        or Color3.fromRGB(
-            9,
-            9,
-            15
-        )
-
-    item.BorderSizePixel = 0
-
-    item.Parent = parent
-
-    AddCorner(item, 6)
-
-    if selected then
-
-        local indicator =
-            Instance.new("Frame")
-
-        indicator.Position =
-            UDim2.fromOffset(
-                0,
-                7
-            )
-
-        indicator.Size =
-            UDim2.fromOffset(
-                2,
-                24
-            )
-
-        indicator.BackgroundColor3 =
-            COLORS.Purple
-
-        indicator.BorderSizePixel = 0
-
-        indicator.Parent = item
-
-        AddCorner(indicator, 2)
-    end
-
-    local iconLabel =
-        CreateLabel(
-            item,
-            icon,
-            UDim2.fromOffset(
-                28,
-                38
-            ),
-            UDim2.fromOffset(
-                10,
-                0
-            ),
-            Enum.Font.Gotham,
-            15,
-            selected
-            and COLORS.PurpleBright
-            or COLORS.Muted
-        )
-
-    iconLabel.TextXAlignment =
-        Enum.TextXAlignment.Center
-
-    local textLabel =
-        CreateLabel(
-            item,
-            text,
-            UDim2.new(
-                1,
-                -50,
-                1,
-                0
-            ),
-            UDim2.fromOffset(
-                43,
-                0
-            ),
-            Enum.Font.Gotham,
-            13,
-            selected
-            and COLORS.White
-            or COLORS.Muted
-        )
-
-    return item
+    corner.Parent =
+        instance
 end
 
 --==================================================
@@ -884,7 +814,8 @@ local function CreateKeyWindow(
     initialMessage
 )
 
-    local parent = GetUiParent()
+    local parent =
+        GetUiParent()
 
     local old =
         parent:FindFirstChild(
@@ -895,12 +826,10 @@ local function CreateKeyWindow(
         old:Destroy()
     end
 
-    --==================================================
-    -- SCREEN GUI
-    --==================================================
-
     local gui =
-        Instance.new("ScreenGui")
+        Instance.new(
+            "ScreenGui"
+        )
 
     gui.Name =
         "ZANJI_Public_Key_UI"
@@ -909,14 +838,17 @@ local function CreateKeyWindow(
     gui.ResetOnSpawn = false
     gui.DisplayOrder = 999999
 
-    gui.Parent = parent
+    gui.Parent =
+        parent
 
     --==================================================
-    -- MAIN WINDOW
+    -- WINDOW
     --==================================================
 
     local window =
-        Instance.new("Frame")
+        Instance.new(
+            "Frame"
+        )
 
     window.AnchorPoint =
         Vector2.new(
@@ -932,469 +864,153 @@ local function CreateKeyWindow(
 
     window.Size =
         UDim2.fromOffset(
-            720,
-            455
+            430,
+            245
         )
 
+    -- ZANJIHUB DARK COLOR
     window.BackgroundColor3 =
-        COLORS.Background
+        Color3.fromRGB(
+            8,
+            8,
+            14
+        )
 
     window.BorderSizePixel = 0
-
     window.Active = true
+    window.Draggable = true
 
-    window.Parent = gui
+    window.Parent =
+        gui
 
     AddCorner(
         window,
-        8
-    )
-
-    AddStroke(
-        window,
-        COLORS.Border,
-        1,
-        0
+        12
     )
 
     --==================================================
-    -- SIDEBAR
+    -- TITLE
     --==================================================
 
-    local sidebar =
-        Instance.new("Frame")
+    local title =
+        Instance.new(
+            "TextLabel"
+        )
 
-    sidebar.Position =
+    title.Position =
         UDim2.fromOffset(
-            0,
-            0
+            24,
+            20
         )
 
-    sidebar.Size =
+    title.Size =
         UDim2.new(
-            0,
-            180,
             1,
-            0
-        )
-
-    sidebar.BackgroundColor3 =
-        COLORS.Sidebar
-
-    sidebar.BorderSizePixel = 0
-
-    sidebar.Parent = window
-
-    AddCorner(
-        sidebar,
-        8
-    )
-
-    -- cover right side of sidebar corner
-    local sidebarCover =
-        Instance.new("Frame")
-
-    sidebarCover.Position =
-        UDim2.fromOffset(
-            170,
-            0
-        )
-
-    sidebarCover.Size =
-        UDim2.new(
+            -48,
             0,
-            10,
-            1,
-            0
+            30
         )
 
-    sidebarCover.BackgroundColor3 =
-        COLORS.Sidebar
+    title.BackgroundTransparency = 1
 
-    sidebarCover.BorderSizePixel = 0
+    title.Font =
+        Enum.Font.GothamBold
 
-    sidebarCover.Parent = sidebar
+    title.Text =
+        "ZANJI V2 PREMIUM ACCESS"
 
-    --==================================================
-    -- LOGO
-    --==================================================
-
-    local logo =
-        CreateLabel(
-            sidebar,
-            "ZANJIHUB",
-            UDim2.new(
-                1,
-                -30,
-                0,
-                42
-            ),
-            UDim2.fromOffset(
-                18,
-                10
-            ),
-            Enum.Font.GothamBold,
-            21,
-            COLORS.PurpleBright
-        )
-
-    logo.TextStrokeTransparency = 0.65
-    logo.TextStrokeColor3 =
+    title.TextColor3 =
         Color3.fromRGB(
-            255,
-            110,
-            210
+            238,
+            238,
+            245
         )
 
-    logo.TextXAlignment =
+    title.TextSize = 20
+
+    title.TextXAlignment =
         Enum.TextXAlignment.Left
 
-    CreateLine(
-        sidebar,
+    title.Parent =
+        window
+
+    --==================================================
+    -- SUBTITLE
+    --==================================================
+
+    local subtitle =
+        Instance.new(
+            "TextLabel"
+        )
+
+    subtitle.Position =
         UDim2.fromOffset(
-            0,
+            24,
             57
         )
-    )
 
-    --==================================================
-    -- SIDEBAR ITEMS
-    --==================================================
-
-    CreateSidebarItem(
-        sidebar,
-        "Home",
-        "⌂",
-        68,
-        false
-    )
-
-    CreateSidebarItem(
-        sidebar,
-        "Transfer",
-        "♧",
-        110,
-        true
-    )
-
-    CreateSidebarItem(
-        sidebar,
-        "Pick Place",
-        "⇄",
-        152,
-        false
-    )
-
-    CreateSidebarItem(
-        sidebar,
-        "Visuals",
-        "◉",
-        194,
-        false
-    )
-
-    CreateSidebarItem(
-        sidebar,
-        "Webhook",
-        "↗",
-        236,
-        false
-    )
-
-    CreateSidebarItem(
-        sidebar,
-        "Settings",
-        "⚙",
-        278,
-        false
-    )
-
-    --==================================================
-    -- SIDEBAR FOOTER
-    --==================================================
-
-    local footer =
-        CreateLabel(
-            sidebar,
-            "ZANJIHUB",
-            UDim2.new(
-                1,
-                -20,
-                0,
-                22
-            ),
-            UDim2.fromOffset(
-                10,
-                420
-            ),
-            Enum.Font.Gotham,
-            10,
-            COLORS.Muted2
-        )
-
-    footer.TextXAlignment =
-        Enum.TextXAlignment.Center
-
-    --==================================================
-    -- SIDEBAR DIVIDER
-    --==================================================
-
-    local divider =
-        Instance.new("Frame")
-
-    divider.Position =
-        UDim2.fromOffset(
-            179,
-            0
-        )
-
-    divider.Size =
-        UDim2.new(
-            0,
-            1,
-            1,
-            0
-        )
-
-    divider.BackgroundColor3 =
-        COLORS.BorderSoft
-
-    divider.BorderSizePixel = 0
-
-    divider.Parent = window
-
-    --==================================================
-    -- CONTENT AREA
-    --==================================================
-
-    local content =
-        Instance.new("Frame")
-
-    content.Position =
-        UDim2.fromOffset(
-            180,
-            0
-        )
-
-    content.Size =
+    subtitle.Size =
         UDim2.new(
             1,
-            -180,
-            1,
-            0
-        )
-
-    content.BackgroundTransparency = 1
-
-    content.Parent = window
-
-    --==================================================
-    -- TOP HEADER
-    --==================================================
-
-    local header =
-        Instance.new("Frame")
-
-    header.Position =
-        UDim2.fromOffset(
+            -48,
             0,
-            0
+            32
         )
 
-    header.Size =
-        UDim2.new(
-            1,
-            0,
-            0,
-            58
+    subtitle.BackgroundTransparency = 1
+
+    subtitle.Font =
+        Enum.Font.Gotham
+
+    subtitle.Text =
+        "Enter your ZANJI key. A valid key is saved automatically."
+
+    subtitle.TextColor3 =
+        Color3.fromRGB(
+            125,
+            125,
+            140
         )
 
-    header.BackgroundTransparency = 1
+    subtitle.TextSize = 13
 
-    header.Parent = content
+    subtitle.TextWrapped = true
 
-    local headerTitle =
-        CreateLabel(
-            header,
-            "Premium Access",
-            UDim2.new(
-                1,
-                -40,
-                0,
-                25
-            ),
-            UDim2.fromOffset(
-                16,
-                8
-            ),
-            Enum.Font.Code,
-            15,
-            COLORS.White
-        )
+    subtitle.TextXAlignment =
+        Enum.TextXAlignment.Left
 
-    local headerSubtitle =
-        CreateLabel(
-            header,
-            "Enter your license key to access ZANJIHUB.",
-            UDim2.new(
-                1,
-                -40,
-                0,
-                20
-            ),
-            UDim2.fromOffset(
-                16,
-                31
-            ),
-            Enum.Font.Code,
-            10,
-            COLORS.Muted
-        )
-
-    CreateLine(
-        content,
-        UDim2.fromOffset(
-            0,
-            58
-        )
-    )
-
-    --==================================================
-    -- ACCESS CARD
-    --==================================================
-
-    local card =
-        Instance.new("Frame")
-
-    card.Position =
-        UDim2.fromOffset(
-            14,
-            72
-        )
-
-    card.Size =
-        UDim2.new(
-            1,
-            -28,
-            0,
-            265
-        )
-
-    card.BackgroundColor3 =
-        COLORS.Card
-
-    card.BorderSizePixel = 0
-
-    card.Parent = content
-
-    AddCorner(
-        card,
-        7
-    )
-
-    AddStroke(
-        card,
-        COLORS.Border,
-        1,
-        0
-    )
-
-    --==================================================
-    -- CARD TITLE
-    --==================================================
-
-    local cardTitle =
-        CreateLabel(
-            card,
-            "🔐  ZANJI PREMIUM LICENSE",
-            UDim2.new(
-                1,
-                -28,
-                0,
-                28
-            ),
-            UDim2.fromOffset(
-                14,
-                10
-            ),
-            Enum.Font.Code,
-            14,
-            COLORS.White
-        )
-
-    local cardDescription =
-        CreateLabel(
-            card,
-            "Authenticate your account to continue.",
-            UDim2.new(
-                1,
-                -28,
-                0,
-                20
-            ),
-            UDim2.fromOffset(
-                14,
-                35
-            ),
-            Enum.Font.Code,
-            10,
-            COLORS.Muted
-        )
-
-    CreateLine(
-        card,
-        UDim2.fromOffset(
-            0,
-            61
-        )
-    )
-
-    --==================================================
-    -- KEY LABEL
-    --==================================================
-
-    local keyLabel =
-        CreateLabel(
-            card,
-            "License Key",
-            UDim2.new(
-                1,
-                -28,
-                0,
-                20
-            ),
-            UDim2.fromOffset(
-                14,
-                72
-            ),
-            Enum.Font.Code,
-            11,
-            COLORS.Text
-        )
+    subtitle.Parent =
+        window
 
     --==================================================
     -- KEY BOX
     --==================================================
 
     local keyBox =
-        Instance.new("TextBox")
+        Instance.new(
+            "TextBox"
+        )
 
     keyBox.Position =
         UDim2.fromOffset(
-            14,
-            96
+            24,
+            101
         )
 
     keyBox.Size =
         UDim2.new(
             1,
-            -28,
+            -48,
             0,
-            42
+            44
         )
 
     keyBox.BackgroundColor3 =
-        COLORS.Input
+        Color3.fromRGB(
+            10,
+            10,
+            18
+        )
 
     keyBox.BorderSizePixel = 0
 
@@ -1407,503 +1023,147 @@ local function CreateKeyWindow(
         "ZANJI-XXXX-XXXX-XXXX"
 
     keyBox.PlaceholderColor3 =
-        COLORS.Muted2
+        Color3.fromRGB(
+            90,
+            90,
+            105
+        )
 
     keyBox.Text =
-        Clean(initialKey):upper()
+        Clean(
+            initialKey
+        ):upper()
 
     keyBox.TextColor3 =
-        COLORS.White
+        Color3.fromRGB(
+            238,
+            238,
+            245
+        )
 
-    keyBox.TextSize = 13
+    keyBox.TextSize = 15
 
-    keyBox.TextXAlignment =
-        Enum.TextXAlignment.Left
-
-    keyBox.Parent = card
+    keyBox.Parent =
+        window
 
     AddCorner(
         keyBox,
-        5
-    )
-
-    AddStroke(
-        keyBox,
-        COLORS.BorderSoft,
-        1,
-        0
+        8
     )
 
     --==================================================
-    -- ACTIVATE BUTTON
+    -- BUTTON
     --==================================================
 
     local button =
-        Instance.new("TextButton")
+        Instance.new(
+            "TextButton"
+        )
 
     button.Position =
         UDim2.fromOffset(
-            14,
-            150
+            24,
+            157
         )
 
     button.Size =
         UDim2.new(
             1,
-            -28,
+            -48,
             0,
-            40
+            42
         )
 
+    -- ZANJIHUB PURPLE
     button.BackgroundColor3 =
-        COLORS.PurpleDark
+        Color3.fromRGB(
+            125,
+            65,
+            210
+        )
 
     button.BorderSizePixel = 0
 
-    button.AutoButtonColor = false
-
     button.Font =
-        Enum.Font.Code
+        Enum.Font.GothamBold
 
     button.Text =
         "ACTIVATE ZANJI KEY"
 
     button.TextColor3 =
-        COLORS.White
-
-    button.TextSize = 12
-
-    button.Parent = card
-
-    AddCorner(
-        button,
-        5
-    )
-
-    AddStroke(
-        button,
-        COLORS.Purple,
-        1,
-        0
-    )
-
-    button.MouseEnter:Connect(function()
-
-        if button.Active then
-
-            TweenService:Create(
-                button,
-                TweenInfo.new(
-                    0.12
-                ),
-                {
-                    BackgroundColor3 =
-                        COLORS.Purple
-                }
-            ):Play()
-        end
-    end)
-
-    button.MouseLeave:Connect(function()
-
-        if button.Active then
-
-            TweenService:Create(
-                button,
-                TweenInfo.new(
-                    0.12
-                ),
-                {
-                    BackgroundColor3 =
-                        COLORS.PurpleDark
-                }
-            ):Play()
-        end
-    end)
-
-    --==================================================
-    -- STATUS BOX
-    --==================================================
-
-    local statusBox =
-        Instance.new("Frame")
-
-    statusBox.Position =
-        UDim2.fromOffset(
-            14,
-            202
-        )
-
-    statusBox.Size =
-        UDim2.new(
-            1,
-            -28,
-            0,
-            45
-        )
-
-    statusBox.BackgroundColor3 =
         Color3.fromRGB(
-            9,
-            9,
-            15
+            255,
+            255,
+            255
         )
 
-    statusBox.BorderSizePixel = 0
+    button.TextSize = 14
 
-    statusBox.Parent = card
+    button.Parent =
+        window
 
     AddCorner(
-        statusBox,
-        5
+        button,
+        8
     )
 
-    AddStroke(
-        statusBox,
-        COLORS.BorderSoft,
-        1,
-        0
-    )
-
-    local statusDot =
-        Instance.new("Frame")
-
-    statusDot.Position =
-        UDim2.fromOffset(
-            10,
-            17
-        )
-
-    statusDot.Size =
-        UDim2.fromOffset(
-            8,
-            8
-        )
-
-    statusDot.BackgroundColor3 =
-        COLORS.Purple
-
-    statusDot.BorderSizePixel = 0
-
-    statusDot.Parent = statusBox
-
-    AddCorner(
-        statusDot,
-        10
-    )
+    --==================================================
+    -- STATUS
+    --==================================================
 
     local status =
-        CreateLabel(
-            statusBox,
-            tostring(
-                initialMessage
-                or "Ready to authenticate."
-            ),
-            UDim2.new(
-                1,
-                -32,
-                1,
-                0
-            ),
-            UDim2.fromOffset(
-                28,
-                0
-            ),
-            Enum.Font.Code,
-            10,
-            COLORS.Muted
+        Instance.new(
+            "TextLabel"
         )
+
+    status.Position =
+        UDim2.fromOffset(
+            24,
+            207
+        )
+
+    status.Size =
+        UDim2.new(
+            1,
+            -48,
+            0,
+            24
+        )
+
+    status.BackgroundTransparency = 1
+
+    status.Font =
+        Enum.Font.Gotham
+
+    status.Text =
+        tostring(
+            initialMessage
+            or ""
+        )
+
+    status.TextColor3 =
+        Color3.fromRGB(
+            125,
+            125,
+            140
+        )
+
+    status.TextSize = 12
 
     status.TextTruncate =
         Enum.TextTruncate.AtEnd
 
-    --==================================================
-    -- INFORMATION CARDS
-    --==================================================
+    status.TextXAlignment =
+        Enum.TextXAlignment.Left
 
-    local info =
-        Instance.new("Frame")
-
-    info.Position =
-        UDim2.fromOffset(
-            14,
-            351
-        )
-
-    info.Size =
-        UDim2.new(
-            1,
-            -28,
-            0,
-            66
-        )
-
-    info.BackgroundTransparency = 1
-
-    info.Parent = content
-
-    local info1 =
-        Instance.new("Frame")
-
-    info1.Size =
-        UDim2.new(
-            0.5,
-            -5,
-            1,
-            0
-        )
-
-    info1.BackgroundColor3 =
-        COLORS.Card
-
-    info1.BorderSizePixel = 0
-
-    info1.Parent = info
-
-    AddCorner(
-        info1,
-        6
-    )
-
-    AddStroke(
-        info1,
-        COLORS.BorderSoft,
-        1,
-        0
-    )
-
-    CreateLabel(
-        info1,
-        "●  SECURE",
-        UDim2.new(
-            1,
-            -20,
-            0,
-            24
-        ),
-        UDim2.fromOffset(
-            10,
-            7
-        ),
-        Enum.Font.Code,
-        10,
-        COLORS.Success
-    )
-
-    CreateLabel(
-        info1,
-        "License verification",
-        UDim2.new(
-            1,
-            -20,
-            0,
-            20
-        ),
-        UDim2.fromOffset(
-            10,
-            30
-        ),
-        Enum.Font.Code,
-        9,
-        COLORS.Muted
-    )
-
-    local info2 =
-        Instance.new("Frame")
-
-    info2.Position =
-        UDim2.new(
-            0.5,
-            5,
-            0,
-            0
-        )
-
-    info2.Size =
-        UDim2.new(
-            0.5,
-            -5,
-            1,
-            0
-        )
-
-    info2.BackgroundColor3 =
-        COLORS.Card
-
-    info2.BorderSizePixel = 0
-
-    info2.Parent = info
-
-    AddCorner(
-        info2,
-        6
-    )
-
-    AddStroke(
-        info2,
-        COLORS.BorderSoft,
-        1,
-        0
-    )
-
-    CreateLabel(
-        info2,
-        "◈  ZANJI V2",
-        UDim2.new(
-            1,
-            -20,
-            0,
-            24
-        ),
-        UDim2.fromOffset(
-            10,
-            7
-        ),
-        Enum.Font.Code,
-        10,
-        COLORS.PurpleBright
-    )
-
-    CreateLabel(
-        info2,
-        "Premium access",
-        UDim2.new(
-            1,
-            -20,
-            0,
-            20
-        ),
-        UDim2.fromOffset(
-            10,
-            30
-        ),
-        Enum.Font.Code,
-        9,
-        COLORS.Muted
-    )
-
-    --==================================================
-    -- DRAGGING
-    --==================================================
-
-    local dragging = false
-    local dragStart
-    local startPosition
-
-    local function UpdateDrag(input)
-
-        local delta =
-            input.Position
-            - dragStart
-
-        window.Position =
-            UDim2.new(
-                startPosition.X.Scale,
-                startPosition.X.Offset
-                    + delta.X,
-
-                startPosition.Y.Scale,
-                startPosition.Y.Offset
-                    + delta.Y
-            )
-    end
-
-    header.InputBegan:Connect(function(input)
-
-        if input.UserInputType ==
-            Enum.UserInputType.MouseButton1
-        then
-
-            dragging = true
-
-            dragStart =
-                input.Position
-
-            startPosition =
-                window.Position
-
-            input.Changed:Connect(
-                function()
-
-                    if input.UserInputState ==
-                        Enum.UserInputState.End
-                    then
-                        dragging = false
-                    end
-                end
-            )
-        end
-    end)
-
-    header.InputChanged:Connect(function(input)
-
-        if input.UserInputType ==
-            Enum.UserInputType.MouseMovement
-        then
-
-            -- handled by global input
-        end
-    end)
-
-    game:GetService("UserInputService")
-        .InputChanged:Connect(function(input)
-
-            if dragging
-            and input.UserInputType ==
-                Enum.UserInputType.MouseMovement
-            then
-
-                UpdateDrag(input)
-            end
-        end)
+    status.Parent =
+        window
 
     --==================================================
     -- SUBMIT
     --==================================================
 
     local busy = false
-
-    local function SetStatus(
-        text,
-        state
-    )
-
-        status.Text =
-            tostring(text or "")
-
-        if state == "success" then
-
-            status.TextColor3 =
-                COLORS.Success
-
-            statusDot.BackgroundColor3 =
-                COLORS.Success
-
-        elseif state == "error" then
-
-            status.TextColor3 =
-                COLORS.Error
-
-            statusDot.BackgroundColor3 =
-                COLORS.Error
-
-        elseif state == "loading" then
-
-            status.TextColor3 =
-                COLORS.PurpleBright
-
-            statusDot.BackgroundColor3 =
-                COLORS.PurpleBright
-
-        else
-
-            status.TextColor3 =
-                COLORS.Muted
-
-            statusDot.BackgroundColor3 =
-                COLORS.Purple
-        end
-    end
 
     local function submit()
 
@@ -1918,10 +1178,8 @@ local function CreateKeyWindow(
 
         if key == "" then
 
-            SetStatus(
-                "Enter your ZANJI key.",
-                "error"
-            )
+            status.Text =
+                "Enter your ZANJI key."
 
             return
         end
@@ -1933,13 +1191,8 @@ local function CreateKeyWindow(
         button.Text =
             "AUTHENTICATING..."
 
-        button.BackgroundColor3 =
-            COLORS.PurpleDark
-
-        SetStatus(
-            "Checking license...",
-            "loading"
-        )
+        status.Text =
+            "Checking license..."
 
         task.spawn(function()
 
@@ -1948,22 +1201,10 @@ local function CreateKeyWindow(
 
             if success then
 
-                SetStatus(
-                    "Authenticated. Loading ZANJIHUB...",
-                    "success"
-                )
+                status.Text =
+                    "Authenticated. Loading ZANJI..."
 
-                button.Text =
-                    "ACCESS GRANTED"
-
-                button.BackgroundColor3 =
-                    Color3.fromRGB(
-                        35,
-                        110,
-                        70
-                    )
-
-                task.wait(0.15)
+                task.wait(0.1)
 
                 gui:Destroy()
 
@@ -1977,13 +1218,8 @@ local function CreateKeyWindow(
             button.Text =
                 "ACTIVATE ZANJI KEY"
 
-            button.BackgroundColor3 =
-                COLORS.PurpleDark
-
-            SetStatus(
-                tostring(err),
-                "error"
-            )
+            status.Text =
+                tostring(err)
 
             warn(
                 "[ZANJI]",
@@ -2004,31 +1240,10 @@ local function CreateKeyWindow(
             end
         end
     )
-
-    --==================================================
-    -- WINDOW FADE IN
-    --==================================================
-
-    window.BackgroundTransparency = 1
-
-    task.spawn(function()
-
-        TweenService:Create(
-            window,
-            TweenInfo.new(
-                0.18,
-                Enum.EasingStyle.Quad,
-                Enum.EasingDirection.Out
-            ),
-            {
-                BackgroundTransparency = 0
-            }
-        ):Play()
-    end)
 end
 
 --==================================================
--- START LOADER
+-- START
 --==================================================
 
 local savedKey =
@@ -2037,7 +1252,9 @@ local savedKey =
 if savedKey ~= "" then
 
     local success, err =
-        RunWithKey(savedKey)
+        RunWithKey(
+            savedKey
+        )
 
     if success then
         return
@@ -2058,5 +1275,5 @@ end
 
 CreateKeyWindow(
     "",
-    "Ready to authenticate."
+    "Paste your ZANJI Premium key to continue."
 )
