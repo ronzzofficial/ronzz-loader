@@ -86,7 +86,7 @@ local SOURCE_ROUTE =
     "/v1/source/zanji_v2"
 
 local KEY_FILE =
-    "ZANJI_Key.txt"
+    "ZanjiHub_Key.txt"
 
 --==================================================
 -- CLEAN
