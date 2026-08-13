@@ -13,7 +13,7 @@ local LocalPlayer =
     or Players.PlayerAdded:Wait()
 
 local API =
-    "https://YOUR-WORKER.workers.dev"
+    "https://zanji-license-api.ronzz191002.workers.dev/"
 
 local PRODUCT =
     "zanji_v2"
