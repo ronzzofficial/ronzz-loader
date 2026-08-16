@@ -785,6 +785,17 @@ end
 -- UI CORNER
 --==================================================
 
+local ZANJI_UI = {
+    Background = Color3.fromRGB(5, 9, 15),
+    Surface = Color3.fromRGB(8, 14, 23),
+    Field = Color3.fromRGB(10, 18, 29),
+    Border = Color3.fromRGB(38, 56, 77),
+    Accent = Color3.fromRGB(39, 140, 255),
+    AccentHover = Color3.fromRGB(62, 154, 255),
+    Text = Color3.fromRGB(232, 237, 245),
+    Muted = Color3.fromRGB(135, 147, 163),
+}
+
 local function AddCorner(
     instance,
     radius
@@ -803,6 +814,21 @@ local function AddCorner(
 
     corner.Parent =
         instance
+end
+
+local function AddStroke(
+    instance,
+    color,
+    thickness,
+    transparency
+)
+    local stroke = Instance.new("UIStroke")
+    stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    stroke.Color = color or ZANJI_UI.Border
+    stroke.Thickness = thickness or 1
+    stroke.Transparency = transparency or 0
+    stroke.Parent = instance
+    return stroke
 end
 
 --==================================================
@@ -864,29 +890,66 @@ local function CreateKeyWindow(
 
     window.Size =
         UDim2.fromOffset(
-            430,
-            245
+            470,
+            275
         )
 
-    -- ZANJIHUB DARK COLOR
     window.BackgroundColor3 =
-        Color3.fromRGB(
-            8,
-            8,
-            14
-        )
+        ZANJI_UI.Surface
 
     window.BorderSizePixel = 0
     window.Active = true
     window.Draggable = true
+    window.ClipsDescendants = true
 
     window.Parent =
         gui
 
     AddCorner(
         window,
-        12
+        9
     )
+
+    AddStroke(window, ZANJI_UI.Border, 1, 0.05)
+
+    local header = Instance.new("Frame")
+    header.Name = "Header"
+    header.Size = UDim2.new(1, 0, 0, 68)
+    header.BackgroundColor3 = ZANJI_UI.Background
+    header.BorderSizePixel = 0
+    header.Parent = window
+
+    local headerDivider = Instance.new("Frame")
+    headerDivider.Name = "Divider"
+    headerDivider.Position = UDim2.new(0, 0, 1, -1)
+    headerDivider.Size = UDim2.new(1, 0, 0, 1)
+    headerDivider.BackgroundColor3 = ZANJI_UI.Border
+    headerDivider.BorderSizePixel = 0
+    headerDivider.Parent = header
+
+    local accent = Instance.new("Frame")
+    accent.Name = "Accent"
+    accent.Position = UDim2.fromOffset(18, 20)
+    accent.Size = UDim2.fromOffset(3, 27)
+    accent.BackgroundColor3 = ZANJI_UI.Accent
+    accent.BorderSizePixel = 0
+    accent.Parent = header
+    AddCorner(accent, 2)
+
+    local secureLabel = Instance.new("TextLabel")
+    secureLabel.Name = "SecureLabel"
+    secureLabel.AnchorPoint = Vector2.new(1, 0.5)
+    secureLabel.Position = UDim2.new(1, -20, 0.5, 0)
+    secureLabel.Size = UDim2.fromOffset(112, 26)
+    secureLabel.BackgroundColor3 = ZANJI_UI.Field
+    secureLabel.BorderSizePixel = 0
+    secureLabel.Font = Enum.Font.GothamMedium
+    secureLabel.Text = "SECURE ACCESS"
+    secureLabel.TextColor3 = ZANJI_UI.Accent
+    secureLabel.TextSize = 11
+    secureLabel.Parent = header
+    AddCorner(secureLabel, 5)
+    AddStroke(secureLabel, ZANJI_UI.Border, 1, 0.15)
 
     --==================================================
     -- TITLE
@@ -899,16 +962,16 @@ local function CreateKeyWindow(
 
     title.Position =
         UDim2.fromOffset(
-            24,
-            20
+            31,
+            13
         )
 
     title.Size =
         UDim2.new(
             1,
-            -48,
+            -170,
             0,
-            30
+            24
         )
 
     title.BackgroundTransparency = 1
@@ -920,19 +983,26 @@ local function CreateKeyWindow(
         "ZANJIHUB PREMIUM ACCESS"
 
     title.TextColor3 =
-        Color3.fromRGB(
-            238,
-            238,
-            245
-        )
+        ZANJI_UI.Text
 
-    title.TextSize = 20
+    title.TextSize = 18
 
     title.TextXAlignment =
         Enum.TextXAlignment.Left
 
     title.Parent =
-        window
+        header
+
+    local titleHint = Instance.new("TextLabel")
+    titleHint.Position = UDim2.fromOffset(31, 37)
+    titleHint.Size = UDim2.new(1, -190, 0, 17)
+    titleHint.BackgroundTransparency = 1
+    titleHint.Font = Enum.Font.Gotham
+    titleHint.Text = "License authentication"
+    titleHint.TextColor3 = ZANJI_UI.Muted
+    titleHint.TextSize = 11
+    titleHint.TextXAlignment = Enum.TextXAlignment.Left
+    titleHint.Parent = header
 
     --==================================================
     -- SUBTITLE
@@ -946,7 +1016,7 @@ local function CreateKeyWindow(
     subtitle.Position =
         UDim2.fromOffset(
             24,
-            57
+            80
         )
 
     subtitle.Size =
@@ -966,11 +1036,7 @@ local function CreateKeyWindow(
         "Enter your ZANJI key. A valid key is saved automatically."
 
     subtitle.TextColor3 =
-        Color3.fromRGB(
-            125,
-            125,
-            140
-        )
+        ZANJI_UI.Muted
 
     subtitle.TextSize = 13
 
@@ -994,7 +1060,7 @@ local function CreateKeyWindow(
     keyBox.Position =
         UDim2.fromOffset(
             24,
-            101
+            116
         )
 
     keyBox.Size =
@@ -1006,11 +1072,7 @@ local function CreateKeyWindow(
         )
 
     keyBox.BackgroundColor3 =
-        Color3.fromRGB(
-            10,
-            10,
-            18
-        )
+        ZANJI_UI.Field
 
     keyBox.BorderSizePixel = 0
 
@@ -1023,11 +1085,7 @@ local function CreateKeyWindow(
         "ZANJI-XXXX-XXXX-XXXX"
 
     keyBox.PlaceholderColor3 =
-        Color3.fromRGB(
-            90,
-            90,
-            105
-        )
+        ZANJI_UI.Muted
 
     keyBox.Text =
         Clean(
@@ -1035,11 +1093,7 @@ local function CreateKeyWindow(
         ):upper()
 
     keyBox.TextColor3 =
-        Color3.fromRGB(
-            238,
-            238,
-            245
-        )
+        ZANJI_UI.Text
 
     keyBox.TextSize = 15
 
@@ -1048,8 +1102,20 @@ local function CreateKeyWindow(
 
     AddCorner(
         keyBox,
-        8
+        6
     )
+
+    local keyBoxStroke = AddStroke(keyBox, ZANJI_UI.Border, 1, 0.05)
+
+    keyBox.Focused:Connect(function()
+        keyBoxStroke.Color = ZANJI_UI.Accent
+        keyBoxStroke.Transparency = 0
+    end)
+
+    keyBox.FocusLost:Connect(function()
+        keyBoxStroke.Color = ZANJI_UI.Border
+        keyBoxStroke.Transparency = 0.05
+    end)
 
     --==================================================
     -- BUTTON
@@ -1063,7 +1129,7 @@ local function CreateKeyWindow(
     button.Position =
         UDim2.fromOffset(
             24,
-            157
+            172
         )
 
     button.Size =
@@ -1074,13 +1140,8 @@ local function CreateKeyWindow(
             42
         )
 
-    -- ZANJIHUB PURPLE
     button.BackgroundColor3 =
-        Color3.fromRGB(
-            125,
-            65,
-            210
-        )
+        ZANJI_UI.Accent
 
     button.BorderSizePixel = 0
 
@@ -1104,8 +1165,20 @@ local function CreateKeyWindow(
 
     AddCorner(
         button,
-        8
+        6
     )
+
+    AddStroke(button, Color3.fromRGB(94, 176, 255), 1, 0.35)
+
+    button.MouseEnter:Connect(function()
+        if button.Active then
+            button.BackgroundColor3 = ZANJI_UI.AccentHover
+        end
+    end)
+
+    button.MouseLeave:Connect(function()
+        button.BackgroundColor3 = ZANJI_UI.Accent
+    end)
 
     --==================================================
     -- STATUS
@@ -1119,7 +1192,7 @@ local function CreateKeyWindow(
     status.Position =
         UDim2.fromOffset(
             24,
-            207
+            225
         )
 
     status.Size =
@@ -1142,11 +1215,7 @@ local function CreateKeyWindow(
         )
 
     status.TextColor3 =
-        Color3.fromRGB(
-            125,
-            125,
-            140
-        )
+        ZANJI_UI.Muted
 
     status.TextSize = 12
 
