@@ -44,10 +44,47 @@ local Environment = GetEnvironment()
 
 --==================================================
 -- EXECUTE ONCE PER JOB
+-- Clears a stopped/expired/paused runtime so the
+-- loader can be executed again without rejoining.
 --==================================================
 
 local existingLoaderRuntime =
     Environment.ZANJI_LOADER_RUNTIME
+
+local existingRuntimeRoot =
+    Environment.ZANJI_RUNTIME_ROOT
+    or _G.ZANJI_RUNTIME_ROOT
+
+if type(existingLoaderRuntime) == "table"
+and existingLoaderRuntime.JobId == game.JobId
+and existingLoaderRuntime.Loaded == true then
+
+    local existingSession =
+        Environment.ZANJI_AUTH_SESSION
+        or _G.ZANJI_AUTH_SESSION
+
+    local authorizationGone =
+        Environment.ZANJI_LOADER_AUTHORIZED ~= true
+
+    local sessionGone =
+        type(existingSession) ~= "table"
+        or type(existingSession.Token) ~= "string"
+        or existingSession.Token == ""
+
+    local licenseRuntimeDead =
+        type(existingRuntimeRoot) == "table"
+        and existingRuntimeRoot.LicenseValid == false
+
+    if authorizationGone
+    or sessionGone
+    or licenseRuntimeDead then
+
+        Environment.ZANJI_LOADER_RUNTIME = nil
+        _G.ZANJI_LOADER_RUNTIME = nil
+
+        existingLoaderRuntime = nil
+    end
+end
 
 if type(existingLoaderRuntime) == "table"
 and existingLoaderRuntime.JobId == game.JobId
