@@ -85,6 +85,9 @@ local PRODUCT =
 local SOURCE_ROUTE =
     "/v1/source/zanji_v2"
 
+local VALIDATE_ROUTE =
+    "/v1/license/validate"
+
 local KEY_FILE =
     "ZanjiHub_Key.txt"
 
@@ -308,6 +311,9 @@ local function FormatApiError(
 
         license_paused =
             "This ZANJI key is paused.",
+
+        license_not_found =
+            "This ZANJI license no longer exists.",
 
         account_limit_reached =
             "This key has no Roblox account slots remaining.",
@@ -627,6 +633,51 @@ local function InstallAuth(session)
     Environment.ZANJI_LOADER_FEATURES =
         features
 
+    local authSession = {
+        Token =
+            tostring(
+                session.Token
+                or ""
+            ),
+
+        API =
+            API,
+
+        ValidateRoute =
+            VALIDATE_ROUTE,
+
+        Product =
+            PRODUCT,
+
+        RobloxUserId =
+            tonumber(
+                LocalPlayer.UserId
+            ) or 0,
+
+        JobId =
+            tostring(
+                game.JobId
+            ),
+
+        Valid =
+            true,
+
+        LeaseSeconds =
+            tonumber(
+                activation.leaseSeconds
+                or 180
+            ) or 180,
+
+        LastValidatedAt =
+            os.time(),
+    }
+
+    Environment.ZANJI_AUTH_SESSION =
+        authSession
+
+    _G.ZANJI_AUTH_SESSION =
+        authSession
+
     _G.ZANJI_LOADER_AUTHORIZED =
         true
 
@@ -647,6 +698,34 @@ local function InstallAuth(session)
 
     _G.ZANJI_LOADER_FEATURES =
         features
+end
+
+local function ClearAuth()
+
+    Environment.ZANJI_LOADER_AUTHORIZED =
+        false
+
+    _G.ZANJI_LOADER_AUTHORIZED =
+        false
+
+    local authSession =
+        Environment.ZANJI_AUTH_SESSION
+        or _G.ZANJI_AUTH_SESSION
+
+    if type(authSession) == "table" then
+
+        authSession.Valid =
+            false
+
+        authSession.Token =
+            nil
+    end
+
+    Environment.ZANJI_AUTH_SESSION =
+        nil
+
+    _G.ZANJI_AUTH_SESSION =
+        nil
 end
 
 --==================================================
@@ -715,15 +794,22 @@ local function RunWithKey(key)
     local source, sourceError =
         DownloadSource(session)
 
-    session.Token = nil
-
     if not source then
+
+        session.Token =
+            nil
 
         return false,
             sourceError
     end
 
     InstallAuth(session)
+
+    -- The private source receives a short-lived rolling
+    -- lease through ZANJI_AUTH_SESSION. The local activation
+    -- table itself does not keep another token copy.
+    session.Token =
+        nil
 
     SaveKey(key)
 
@@ -740,6 +826,8 @@ local function RunWithKey(key)
         }
 
     else
+
+        ClearAuth()
 
         -- Allow retry if loading failed.
         Environment.ZANJI_LOADER_RUNTIME = {
