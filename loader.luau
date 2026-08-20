@@ -1377,6 +1377,145 @@ local function CreateKeyWindow(
     )
 end
 
+
+--==================================================
+-- AUTO RE-EXECUTE / REOPEN KEY UI
+-- Called by the private source after a live license
+-- becomes expired or paused.
+--
+-- Behavior:
+-- 1. Retry the saved key one time.
+-- 2. If still expired/paused, open the normal key UI.
+-- 3. If the key was renewed/unpaused already, ZANJI loads again.
+--==================================================
+
+local ZanjiAutoReexecuteBusy =
+    false
+
+local function ResetLoaderRuntimeForRetry(stopReason)
+
+    local runtime = {
+        JobId = game.JobId,
+        Loading = false,
+        Loaded = false,
+        Channel = "public",
+        StopReason = tostring(stopReason or ""),
+    }
+
+    Environment.ZANJI_LOADER_RUNTIME =
+        runtime
+
+    _G.ZANJI_LOADER_RUNTIME =
+        runtime
+end
+
+local function ReexecutePublicLoader(
+    stopReason,
+    fallbackMessage
+)
+
+    if ZanjiAutoReexecuteBusy then
+        return false,
+            "ZANJI key UI is already reopening."
+    end
+
+    ZanjiAutoReexecuteBusy =
+        true
+
+    -- Make sure a dead private runtime cannot trigger the
+    -- loader's "already loading or loaded" guard.
+    ResetLoaderRuntimeForRetry(
+        stopReason
+    )
+
+    local savedKey =
+        ReadSavedKey()
+
+    if savedKey ~= "" then
+
+        local loadingRuntime = {
+            JobId = game.JobId,
+            Loading = true,
+            Loaded = false,
+            Channel = "public",
+            StopReason = tostring(stopReason or ""),
+        }
+
+        Environment.ZANJI_LOADER_RUNTIME =
+            loadingRuntime
+
+        _G.ZANJI_LOADER_RUNTIME =
+            loadingRuntime
+
+        local success, err =
+            RunWithKey(
+                savedKey
+            )
+
+        if success then
+
+            ZanjiAutoReexecuteBusy =
+                false
+
+            return true
+        end
+
+        -- Activation/source failed. Unlock the loader so the
+        -- user can press ACTIVATE again after renewal/unpause.
+        ResetLoaderRuntimeForRetry(
+            stopReason
+        )
+
+        local message =
+            tostring(
+                err
+                or fallbackMessage
+                or "ZANJI access is unavailable."
+            )
+
+        CreateKeyWindow(
+            savedKey,
+            message
+        )
+
+        ZanjiAutoReexecuteBusy =
+            false
+
+        return false,
+            message
+    end
+
+    ResetLoaderRuntimeForRetry(
+        stopReason
+    )
+
+    CreateKeyWindow(
+        "",
+        tostring(
+            fallbackMessage
+            or "Paste your ZANJI Premium key to continue."
+        )
+    )
+
+    ZanjiAutoReexecuteBusy =
+        false
+
+    return false,
+        tostring(
+            fallbackMessage
+            or "No saved key."
+        )
+end
+
+-- Keep this closure alive after the public loader chunk finishes.
+-- Both split private builds can call it without downloading the
+-- public loader script again.
+Environment.ZANJI_REEXECUTE_PUBLIC_LOADER =
+    ReexecutePublicLoader
+
+_G.ZANJI_REEXECUTE_PUBLIC_LOADER =
+    ReexecutePublicLoader
+
 --==================================================
 -- START
 --==================================================
