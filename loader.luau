@@ -1,5 +1,5 @@
 --==================================================
--- ZANJI PUBLIC LOADER
+-- ZANJI PUBLIC LOADER - LIVE SESSION REFRESH v3
 -- Put this file in your public GitHub repository.
 -- The actual ZANJI source is never stored in this file.
 --==================================================
@@ -606,6 +606,109 @@ local function DownloadSource(session)
 end
 
 --==================================================
+-- REFRESH LIVE SESSION
+--
+-- The Worker lease is short-lived. Source download can consume part of
+-- that lease, especially when GitHub is slow. Refresh the token AFTER
+-- the source has downloaded so the private source always starts with a
+-- fresh lease.
+--==================================================
+
+local function RefreshLiveSession(session)
+
+    if type(session) ~= "table"
+    or Clean(session.Token) == "" then
+
+        return false,
+            "Live session token is missing."
+    end
+
+    local response,
+        requestError =
+        SendRequest({
+
+            Url =
+                API
+                .. VALIDATE_ROUTE,
+
+            Method = "POST",
+
+            Headers = {
+                ["Authorization"] =
+                    "Bearer "
+                    .. tostring(
+                        session.Token
+                    ),
+
+                ["Content-Type"] =
+                    "application/json",
+
+                ["Accept"] =
+                    "application/json",
+
+                ["Accept-Encoding"] =
+                    "identity",
+
+                ["Cache-Control"] =
+                    "no-cache",
+            },
+
+            Body = "{}",
+        })
+
+    if not response then
+        return false,
+            "Session refresh failed: "
+            .. tostring(requestError)
+    end
+
+    local decoded =
+        DecodeJson(
+            response.Body
+        )
+
+    if not response.Success
+    or type(decoded) ~= "table"
+    or decoded.ok ~= true then
+
+        return false,
+            FormatApiError(
+                decoded,
+                "Session refresh failed with HTTP "
+                    .. tostring(
+                        response.StatusCode
+                    )
+            )
+    end
+
+    local newToken =
+        Clean(
+            decoded.accessToken
+            or decoded.access_token
+            or decoded.token
+        )
+
+    if newToken == "" then
+        return false,
+            "Session refresh returned no access token."
+    end
+
+    session.Token =
+        newToken
+
+    session.Activation =
+        session.Activation
+        or {}
+
+    if tonumber(decoded.expiresAt) then
+        session.Activation.expiresAt =
+            tonumber(decoded.expiresAt)
+    end
+
+    return true
+end
+
+--==================================================
 -- INSTALL AUTH
 --==================================================
 
@@ -780,6 +883,37 @@ local function RunWithKey(key)
 
         return false,
             sourceError
+    end
+
+    -- Source delivery may take long enough to consume most of the
+    -- short-lived Worker lease. Refresh it now, immediately before
+    -- installing auth and starting the private source.
+    local refreshed,
+        refreshError =
+        RefreshLiveSession(
+            session
+        )
+
+    if not refreshed then
+
+        -- If the lease already expired during source delivery, the key
+        -- itself may still be perfectly valid. Reactivate once to obtain
+        -- a fresh lease instead of starting ZANJI with a dead token.
+        local replacementSession,
+            replacementError =
+            ActivateKey(
+                key
+            )
+
+        if not replacementSession then
+            return false,
+                replacementError
+                or refreshError
+                or "Unable to refresh the ZANJI session."
+        end
+
+        session =
+            replacementSession
     end
 
     InstallAuth(session)
