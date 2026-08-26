@@ -125,8 +125,16 @@ local SOURCE_ROUTE =
 local VALIDATE_ROUTE =
     "/v1/license/validate"
 
+local CONFIG_ROUTE =
+    "/v1/config/zanji_v2"
+
 local KEY_FILE =
     "ZanjiHub_Key.txt"
+
+-- This value comes from the Worker. Do not change it in a public loader;
+-- set the Worker variable ZANJI_KEY_SYSTEM_ENABLED instead.
+local ZANJI_KEY_SYSTEM_ENABLED =
+    true
 
 --==================================================
 -- CLEAN
@@ -271,6 +279,59 @@ local function DecodeJson(body)
     end
 
     return nil
+end
+
+--==================================================
+-- RELEASE MODE
+--==================================================
+
+local function FetchKeySystemMode()
+
+    local response, requestError =
+        SendRequest({
+
+            Url =
+                API
+                .. CONFIG_ROUTE,
+
+            Method = "GET",
+
+            Headers = {
+                ["Accept"] =
+                    "application/json",
+
+                ["Accept-Encoding"] =
+                    "identity",
+
+                ["Cache-Control"] =
+                    "no-cache",
+            },
+        })
+
+    if not response then
+        return nil,
+            "Could not read the ZANJI release mode: "
+            .. tostring(requestError)
+    end
+
+    local decoded =
+        DecodeJson(
+            response.Body
+        )
+
+    if not response.Success
+    or type(decoded) ~= "table"
+    or type(decoded.keySystemEnabled) ~= "boolean" then
+
+        return nil,
+            "Could not read the ZANJI release mode (HTTP "
+            .. tostring(
+                response.StatusCode
+            )
+            .. ")."
+    end
+
+    return decoded.keySystemEnabled
 end
 
 --==================================================
@@ -515,6 +576,32 @@ end
 
 local function DownloadSource(session)
 
+    local headers = {
+        ["X-Zanji-Place-Id"] =
+            tostring(
+                game.PlaceId
+            ),
+
+        ["Accept"] =
+            "text/plain",
+
+        ["Accept-Encoding"] =
+            "identity",
+
+        ["Cache-Control"] =
+            "no-cache",
+    }
+
+    if ZANJI_KEY_SYSTEM_ENABLED then
+        headers["Authorization"] =
+            "Bearer "
+            .. tostring(
+                session
+                and session.Token
+                or ""
+            )
+    end
+
     local response, requestError =
         SendRequest({
 
@@ -524,23 +611,7 @@ local function DownloadSource(session)
 
             Method = "GET",
 
-            Headers = {
-
-                ["Authorization"] =
-                    "Bearer "
-                    .. tostring(
-                        session.Token
-                    ),
-
-                ["Accept"] =
-                    "text/plain",
-
-                ["Accept-Encoding"] =
-                    "identity",
-
-                ["Cache-Control"] =
-                    "no-cache",
-            },
+            Headers = headers,
         })
 
     if not response then
@@ -604,6 +675,42 @@ local function DownloadSource(session)
 
     return source
 end
+
+local loadedKeySystemMode,
+    keySystemModeError =
+    FetchKeySystemMode()
+
+if type(loadedKeySystemMode) ~= "boolean" then
+
+    Environment.ZANJI_LOADER_RUNTIME = {
+        JobId = game.JobId,
+        Loading = false,
+        Loaded = false,
+        Channel = "public",
+    }
+
+    _G.ZANJI_LOADER_RUNTIME =
+        Environment.ZANJI_LOADER_RUNTIME
+
+    warn(
+        "[ZANJI]",
+        tostring(
+            keySystemModeError
+            or "Unable to determine the release mode."
+        )
+    )
+
+    return
+end
+
+ZANJI_KEY_SYSTEM_ENABLED =
+    loadedKeySystemMode
+
+Environment.ZANJI_KEY_SYSTEM_ENABLED =
+    ZANJI_KEY_SYSTEM_ENABLED
+
+_G.ZANJI_KEY_SYSTEM_ENABLED =
+    ZANJI_KEY_SYSTEM_ENABLED
 
 --==================================================
 -- REFRESH LIVE SESSION
@@ -810,6 +917,60 @@ local function InstallAuth(session)
         features
 end
 
+local function InstallPublicMode()
+
+    Environment.ZANJI_KEY_SYSTEM_ENABLED =
+        false
+
+    _G.ZANJI_KEY_SYSTEM_ENABLED =
+        false
+
+    Environment.ZANJI_LOADER_AUTHORIZED =
+        false
+
+    _G.ZANJI_LOADER_AUTHORIZED =
+        false
+
+    Environment.ZANJI_AUTH_SESSION = nil
+    _G.ZANJI_AUTH_SESSION = nil
+
+    Environment.ZANJI_LOADER_OWNER =
+        "Public"
+
+    Environment.ZANJI_LOADER_PLAN =
+        "public"
+
+    Environment.ZANJI_LOADER_EXPIRES_AT =
+        0
+
+    Environment.ZANJI_LOADER_MAX_ACCOUNTS =
+        0
+
+    Environment.ZANJI_LOADER_SLOTS_USED =
+        0
+
+    Environment.ZANJI_LOADER_FEATURES =
+        {}
+
+    _G.ZANJI_LOADER_OWNER =
+        Environment.ZANJI_LOADER_OWNER
+
+    _G.ZANJI_LOADER_PLAN =
+        Environment.ZANJI_LOADER_PLAN
+
+    _G.ZANJI_LOADER_EXPIRES_AT =
+        Environment.ZANJI_LOADER_EXPIRES_AT
+
+    _G.ZANJI_LOADER_MAX_ACCOUNTS =
+        Environment.ZANJI_LOADER_MAX_ACCOUNTS
+
+    _G.ZANJI_LOADER_SLOTS_USED =
+        Environment.ZANJI_LOADER_SLOTS_USED
+
+    _G.ZANJI_LOADER_FEATURES =
+        Environment.ZANJI_LOADER_FEATURES
+end
+
 --==================================================
 -- COMPILE / RUN
 --==================================================
@@ -949,6 +1110,38 @@ local function RunWithKey(key)
             Channel = "public",
         }
     end
+
+    return success, errorMessage
+end
+
+--==================================================
+-- RUN WITHOUT KEY
+--==================================================
+
+local function RunWithoutKey()
+
+    local source, sourceError =
+        DownloadSource(nil)
+
+    if not source then
+        return false,
+            sourceError
+    end
+
+    InstallPublicMode()
+
+    local success, errorMessage =
+        CompileAndRun(source)
+
+    Environment.ZANJI_LOADER_RUNTIME = {
+        JobId = game.JobId,
+        Loading = false,
+        Loaded = success == true,
+        Channel = "public-no-key",
+    }
+
+    _G.ZANJI_LOADER_RUNTIME =
+        Environment.ZANJI_LOADER_RUNTIME
 
     return success, errorMessage
 end
@@ -1556,6 +1749,30 @@ local function ReexecutePublicLoader(
     ZanjiAutoReexecuteBusy =
         true
 
+    if not ZANJI_KEY_SYSTEM_ENABLED then
+
+        ResetLoaderRuntimeForRetry(
+            stopReason
+        )
+
+        local success, err =
+            RunWithoutKey()
+
+        ZanjiAutoReexecuteBusy =
+            false
+
+        if success then
+            return true
+        end
+
+        return false,
+            tostring(
+                err
+                or fallbackMessage
+                or "Unable to load the public ZANJI build."
+            )
+    end
+
     -- Make sure a dead private runtime cannot trigger the
     -- loader's "already loading or loaded" guard.
     ResetLoaderRuntimeForRetry(
@@ -1653,6 +1870,21 @@ _G.ZANJI_REEXECUTE_PUBLIC_LOADER =
 --==================================================
 -- START
 --==================================================
+
+if not ZANJI_KEY_SYSTEM_ENABLED then
+
+    local success, err =
+        RunWithoutKey()
+
+    if not success then
+        warn(
+            "[ZANJI] Public build failed:",
+            tostring(err)
+        )
+    end
+
+    return
+end
 
 local savedKey =
     ReadSavedKey()
