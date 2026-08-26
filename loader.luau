@@ -128,6 +128,9 @@ local VALIDATE_ROUTE =
 local CONFIG_ROUTE =
     "/v1/config/zanji_v2"
 
+local USAGE_TRACK_ROUTE =
+    "/v1/usage/track"
+
 local KEY_FILE =
     "ZanjiHub_Key.txt"
 
@@ -713,6 +716,66 @@ _G.ZANJI_KEY_SYSTEM_ENABLED =
     ZANJI_KEY_SYSTEM_ENABLED
 
 --==================================================
+-- PUBLIC USAGE TRACKING
+-- Records one best-effort launch in D1 when the release is public.
+-- Tracking failures never prevent ZANJI from loading.
+--==================================================
+
+local function TrackPublicUsage()
+
+    if ZANJI_KEY_SYSTEM_ENABLED then
+        return true
+    end
+
+    local body =
+        HttpService:JSONEncode({
+            RobloxUserId =
+                tostring(
+                    LocalPlayer.UserId
+                ),
+
+            RobloxUsername =
+                tostring(
+                    LocalPlayer.Name
+                ),
+
+            PlaceId =
+                tostring(
+                    game.PlaceId
+                ),
+        })
+
+    local response =
+        SendRequest({
+
+            Url =
+                API
+                .. USAGE_TRACK_ROUTE,
+
+            Method = "POST",
+
+            Headers = {
+                ["Content-Type"] =
+                    "application/json",
+
+                ["Accept"] =
+                    "application/json",
+
+                ["Accept-Encoding"] =
+                    "identity",
+
+                ["Cache-Control"] =
+                    "no-cache",
+            },
+
+            Body = body,
+        })
+
+    return response ~= nil
+    and response.Success == true
+end
+
+--==================================================
 -- REFRESH LIVE SESSION
 --
 -- The Worker lease is short-lived. Source download can consume part of
@@ -1129,6 +1192,8 @@ local function RunWithoutKey()
     end
 
     InstallPublicMode()
+
+    TrackPublicUsage()
 
     local success, errorMessage =
         CompileAndRun(source)
