@@ -1472,15 +1472,65 @@ function Library:GetKeyString(KeyCode: Enum.KeyCode)
 end
 
 function Library:GetTextBounds(Text: string, Font: Font, Size: number, Width: number?): (number, number)
-    local Params = Instance.new("GetTextBoundsParams")
-    Params.Text = Text
-    Params.RichText = true
-    Params.Font = Font
-    Params.Size = Size
-    Params.Width = Width or workspace.CurrentCamera.ViewportSize.X - 32
+    local SafeText = tostring(Text or "")
+    local SafeSize = math.clamp(tonumber(Size) or 14, 1, 200)
+    local Camera = workspace.CurrentCamera
+    local ViewportWidth = Camera and Camera.ViewportSize.X or 1920
+    local SafeWidth = tonumber(Width) or (ViewportWidth - 32)
 
-    local Bounds = TextService:GetTextBoundsAsync(Params)
-    return Bounds.X, Bounds.Y
+    -- Tooltip positions briefly report an off-screen AbsolutePosition while
+    -- the UI is mounting. That used to produce a zero/negative Width and made
+    -- GetTextBoundsAsync throw "Temp read failed", aborting the public build.
+    if SafeWidth ~= SafeWidth or SafeWidth == math.huge or SafeWidth == -math.huge then
+        SafeWidth = ViewportWidth - 32
+    end
+    SafeWidth = math.clamp(SafeWidth, 1, 100000)
+
+    local Success, Bounds = pcall(function()
+        local Params = Instance.new("GetTextBoundsParams")
+        Params.Text = SafeText
+        Params.RichText = true
+        Params.Font = Font
+        Params.Size = SafeSize
+        Params.Width = SafeWidth
+        return TextService:GetTextBoundsAsync(Params)
+    end)
+
+    if Success and Bounds then
+        return Bounds.X, Bounds.Y
+    end
+
+    -- Some executors intermittently fail the newer async API even with valid
+    -- parameters. The legacy measurement keeps the UI usable without allowing
+    -- a cosmetic text calculation to stop the complete script.
+    local LegacySuccess, LegacyBounds = pcall(function()
+        return TextService:GetTextSize(
+            SafeText,
+            SafeSize,
+            Enum.Font.SourceSans,
+            Vector2.new(SafeWidth, 100000)
+        )
+    end)
+
+    if LegacySuccess and LegacyBounds then
+        return LegacyBounds.X, LegacyBounds.Y
+    end
+
+    -- Last-resort deterministic estimate for executors that expose neither
+    -- measurement API reliably. It only affects cosmetic UI sizing.
+    local PlainText = SafeText:gsub("<[^>]->", "")
+    local CharacterWidth = math.max(1, SafeSize * 0.55)
+    local CharactersPerLine = math.max(1, math.floor(SafeWidth / CharacterWidth))
+    local LongestLine = 0
+    local LineCount = 0
+
+    for Line in (PlainText .. "\n"):gmatch("(.-)\n") do
+        local Length = #Line
+        LongestLine = math.max(LongestLine, math.min(Length, CharactersPerLine))
+        LineCount = LineCount + math.max(1, math.ceil(Length / CharactersPerLine))
+    end
+
+    return math.min(SafeWidth, LongestLine * CharacterWidth), math.max(SafeSize, LineCount * SafeSize * 1.2)
 end
 
 function Library:MouseIsOverFrame(Frame: GuiObject, Mouse: Vector2): boolean
