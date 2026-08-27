@@ -1500,12 +1500,17 @@ function Library:GetTextBounds(Text: string, Font: Font, Size: number, Width: nu
         return Bounds.X, Bounds.Y
     end
 
+    -- Legacy GetTextSize does not understand RichText. Strip formatting tags
+    -- before either fallback so tags such as <font> and <b> cannot be counted
+    -- as visible characters and create enormous blank-looking label heights.
+    local PlainText = SafeText:gsub("<[^<>]->", "")
+
     -- Some executors intermittently fail the newer async API even with valid
     -- parameters. The legacy measurement keeps the UI usable without allowing
     -- a cosmetic text calculation to stop the complete script.
     local LegacySuccess, LegacyBounds = pcall(function()
         return TextService:GetTextSize(
-            SafeText,
+            PlainText,
             SafeSize,
             Enum.Font.SourceSans,
             Vector2.new(SafeWidth, 100000)
@@ -1518,7 +1523,6 @@ function Library:GetTextBounds(Text: string, Font: Font, Size: number, Width: nu
 
     -- Last-resort deterministic estimate for executors that expose neither
     -- measurement API reliably. It only affects cosmetic UI sizing.
-    local PlainText = SafeText:gsub("<[^>]->", "")
     local CharacterWidth = math.max(1, SafeSize * 0.55)
     local CharactersPerLine = math.max(1, math.floor(SafeWidth / CharacterWidth))
     local LongestLine = 0
@@ -5039,6 +5043,7 @@ do
             TextSize = Data.Size,
             TextWrapped = Label.DoesWrap,
             TextXAlignment = Groupbox.IsKeyTab and Enum.TextXAlignment.Center or Enum.TextXAlignment.Left,
+            TextYAlignment = Label.DoesWrap and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center,
             Parent = Container,
         })
 
@@ -5048,7 +5053,13 @@ do
             end
 
             local Width = TextLabel.AbsoluteSize.X
-            if Width <= 0 then return end
+            if Width <= 32 then
+                -- The groupbox can report a tiny transient width while its tab
+                -- is mounting. Measuring long stock/farm text at that width
+                -- creates a huge label with the text far below the title.
+                TextLabel.Size = UDim2.new(1, 0, 0, 18)
+                return
+            end
 
             local _, Y = Library:GetTextBounds(Label.Text, TextLabel.FontFace, TextLabel.TextSize, Width)
             TextLabel.Size = UDim2.new(1, 0, 0, Y + 4)
@@ -5102,6 +5113,16 @@ do
 
         Label.Holder = TextLabel
         table.insert(Groupbox.Elements, Label)
+
+        if Label.DoesWrap then
+            -- Recalculate after the parent column receives its final width.
+            -- This also fixes labels created while Home is not the active tab.
+            task.defer(function()
+                if Label.Destroyed or Groupbox.Destroyed then return end
+                Label:Display()
+                Groupbox:Resize()
+            end)
+        end
 
         if Data.Idx then
             Labels[Data.Idx] = Label
