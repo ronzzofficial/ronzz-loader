@@ -1001,6 +1001,11 @@ local function RefreshLiveSession(session)
             tonumber(decoded.expiresAt)
     end
 
+    if decoded.lifetime ~= nil then
+        session.Activation.lifetime =
+            decoded.lifetime == true
+    end
+
     return true
 end
 
@@ -1051,6 +1056,9 @@ local function InstallAuth(session)
             or 0
         ) or 0
 
+    Environment.ZANJI_LOADER_LIFETIME =
+        activation.lifetime == true
+
     Environment.ZANJI_LOADER_MAX_ACCOUNTS =
         tonumber(
             activation.maxAccounts
@@ -1076,6 +1084,8 @@ local function InstallAuth(session)
         Product = PRODUCT,
         JobId = tostring(game.JobId),
         LastValidationAt = os.clock(),
+        Lifetime =
+            Environment.ZANJI_LOADER_LIFETIME,
     }
 
     Environment.ZANJI_AUTH_SESSION =
@@ -1095,6 +1105,9 @@ local function InstallAuth(session)
 
     _G.ZANJI_LOADER_EXPIRES_AT =
         Environment.ZANJI_LOADER_EXPIRES_AT
+
+    _G.ZANJI_LOADER_LIFETIME =
+        Environment.ZANJI_LOADER_LIFETIME
 
     _G.ZANJI_LOADER_MAX_ACCOUNTS =
         Environment.ZANJI_LOADER_MAX_ACCOUNTS
