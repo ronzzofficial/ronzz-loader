@@ -9989,15 +9989,15 @@ function Library:UpdateNotificationPositions(Snap: boolean?)
     local XScale = IsLeft and 0 or 1
     local RunningY = 0
 
-    -- Newest notification stays at the lowest corner; older notifications
-    -- stack upward so they never cover the top-right game guide.
+    -- Keep the newest notification at the upper corner and stack older
+    -- notifications downward. This is consistent on desktop and mobile.
     for Index = #NotifyOrder, 1, -1 do
         local FakeBackground = NotifyOrder[Index]
         local Data = Library.Notifications[FakeBackground]
         if not (Data and FakeBackground.Parent) then continue end
 
-        FakeBackground.AnchorPoint = Vector2.new(XScale, 1)
-        local Target = UDim2.new(XScale, 0, 1, -RunningY)
+        FakeBackground.AnchorPoint = Vector2.new(XScale, 0)
+        local Target = UDim2.new(XScale, 0, 0, RunningY)
         if Snap or not Data.PositionInitialized then
             FakeBackground.Position = Target
             Data.PositionInitialized = true
@@ -10026,7 +10026,7 @@ function Library:SetNotifySide(Side: string)
 
     for FakeBackground in Library.Notifications do
         if not (FakeBackground and FakeBackground.Parent) then continue end
-        FakeBackground.AnchorPoint = if IsLeft then Vector2.new(0, 1) else Vector2.new(1, 1)
+        FakeBackground.AnchorPoint = if IsLeft then Vector2.new(0, 0) else Vector2.new(1, 0)
     end
 
     if Library.UpdateNotificationPositions then
@@ -13556,41 +13556,28 @@ function Library:CreateWindow(WindowInfo)
             local shortest = math.max(1, math.min(viewport.X, viewport.Y))
             local size = math.floor(math.clamp(shortest * 0.07, 48, 66) + 0.5)
             Holder.Size = UDim2.fromOffset(size, size)
-            Stroke.Thickness = math.clamp(size / 34, 1.2, 2)
+            Stroke.Thickness = 4
+            VioletRingStroke.Thickness = 1.25
             task.defer(clampToViewport)
         end
 
         local hovered = false
         Button.MouseEnter:Connect(function()
-            hovered = true
-            TweenService:Create(
-                Stroke,
-                TweenInfo.new(0.10),
-                { Thickness = 2.25, Transparency = 0 }
-            ):Play()
-            TweenService:Create(
-                VioletRingStroke,
-                TweenInfo.new(0.10),
-                { Thickness = 3.5, Transparency = 0 }
-            ):Play()
-            tweenScale(1.08, 0.10)
+            -- Touch taps can fire MouseEnter without a matching MouseLeave.
+            -- Never use hover to alter the border, otherwise it stays thick
+            -- after opening the window on phones.
+            hovered = not UserInputService.TouchEnabled
+            if hovered then
+                tweenScale(1.04, 0.10)
+            end
         end)
 
         Button.MouseLeave:Connect(function()
             hovered = false
-            TweenService:Create(
-                Stroke,
-                TweenInfo.new(0.10),
-                {
-                    Thickness = math.clamp(Holder.AbsoluteSize.X / 34, 1.2, 2),
-                    Transparency = 0,
-                }
-            ):Play()
-            TweenService:Create(
-                VioletRingStroke,
-                TweenInfo.new(0.10),
-                { Thickness = 3, Transparency = 0 }
-            ):Play()
+            Stroke.Thickness = 4
+            Stroke.Transparency = 0
+            VioletRingStroke.Thickness = 1.25
+            VioletRingStroke.Transparency = 0
             tweenScale(1, 0.10)
         end)
 
@@ -13643,7 +13630,7 @@ function Library:CreateWindow(WindowInfo)
             dragInput = nil
 
             if moved then
-                tweenScale(hovered and 1.08 or 1, 0.12, Enum.EasingStyle.Back)
+                tweenScale(hovered and 1.04 or 1, 0.12, Enum.EasingStyle.Back)
                 return
             end
 
@@ -13652,7 +13639,9 @@ function Library:CreateWindow(WindowInfo)
             tweenScale(1.12, 0.10, Enum.EasingStyle.Back)
             task.delay(0.10, function()
                 if Holder.Parent then
-                    tweenScale(hovered and 1.08 or 1, 0.14, Enum.EasingStyle.Back)
+                    Stroke.Thickness = 4
+                    VioletRingStroke.Thickness = 1.25
+                    tweenScale(hovered and 1.04 or 1, 0.14, Enum.EasingStyle.Back)
                 end
             end)
         end))
@@ -13675,7 +13664,7 @@ function Library:CreateWindow(WindowInfo)
         task.defer(function()
             updateSize()
             pcall(function()
-                game:GetService("ContentProvider"):PreloadAsync({ Button, Logo })
+                game:GetService("ContentProvider"):PreloadAsync({ Button })
             end)
         end)
     end
