@@ -1407,7 +1407,7 @@ do
         AnchorPoint = Vector2.new(1, 0),
         BackgroundTransparency = 1,
         Position = UDim2.new(1, -6, 0, 6),
-        Size = UDim2.new(0, 300, 1, -6),
+        Size = UDim2.new(0, 300, 1, -12),
         Parent = ScreenGui,
     })
     table.insert(
@@ -9989,11 +9989,15 @@ function Library:UpdateNotificationPositions(Snap: boolean?)
     local XScale = IsLeft and 0 or 1
     local RunningY = 0
 
-    for _, FakeBackground in NotifyOrder do
+    -- Newest notification stays at the lowest corner; older notifications
+    -- stack upward so they never cover the top-right game guide.
+    for Index = #NotifyOrder, 1, -1 do
+        local FakeBackground = NotifyOrder[Index]
         local Data = Library.Notifications[FakeBackground]
         if not (Data and FakeBackground.Parent) then continue end
 
-        local Target = UDim2.new(XScale, 0, 0, RunningY)
+        FakeBackground.AnchorPoint = Vector2.new(XScale, 1)
+        local Target = UDim2.new(XScale, 0, 1, -RunningY)
         if Snap or not Data.PositionInitialized then
             FakeBackground.Position = Target
             Data.PositionInitialized = true
@@ -10022,7 +10026,7 @@ function Library:SetNotifySide(Side: string)
 
     for FakeBackground in Library.Notifications do
         if not (FakeBackground and FakeBackground.Parent) then continue end
-        FakeBackground.AnchorPoint = if IsLeft then Vector2.new(0, 0) else Vector2.new(1, 0)
+        FakeBackground.AnchorPoint = if IsLeft then Vector2.new(0, 1) else Vector2.new(1, 1)
     end
 
     if Library.UpdateNotificationPositions then
@@ -13474,11 +13478,38 @@ function Library:CreateWindow(WindowInfo)
         ButtonCorner.Parent = Button
 
         local Stroke = Instance.new("UIStroke")
+        Stroke.Name = "ZanjiLogoVioletBorder"
         Stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-        Stroke.Color = Color3.fromRGB(79, 156, 255)
-        Stroke.Thickness = 1.5
-        Stroke.Transparency = 0.18
+        Stroke.Color = Color3.fromRGB(168, 85, 247)
+        Stroke.Thickness = 2
+        Stroke.Transparency = 0
         Stroke.Parent = Button
+
+        -- The uploaded logo image contains its own thin blue outer ring. A
+        -- normal button outline sits outside that bitmap and cannot cover it,
+        -- so draw a violet circular ring above the image itself.
+        local VioletRing = Instance.new("Frame")
+        VioletRing.Name = "ZanjiLogoVioletRing"
+        VioletRing.AnchorPoint = Vector2.new(0.5, 0.5)
+        VioletRing.Position = UDim2.fromScale(0.5, 0.5)
+        VioletRing.Size = UDim2.new(1, -3, 1, -3)
+        VioletRing.BackgroundTransparency = 1
+        VioletRing.BorderSizePixel = 0
+        VioletRing.Active = false
+        VioletRing.ZIndex = 1000001
+        VioletRing.Parent = Holder
+
+        local VioletRingCorner = Instance.new("UICorner")
+        VioletRingCorner.CornerRadius = UDim.new(1, 0)
+        VioletRingCorner.Parent = VioletRing
+
+        local VioletRingStroke = Instance.new("UIStroke")
+        VioletRingStroke.Name = "ZanjiLogoVioletOverlayStroke"
+        VioletRingStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+        VioletRingStroke.Color = Color3.fromRGB(168, 85, 247)
+        VioletRingStroke.Thickness = 3
+        VioletRingStroke.Transparency = 0
+        VioletRingStroke.Parent = VioletRing
 
         -- Transparent ZANJI logo is intentionally not drawn inside this toggle.
         -- The PNG logo is shown beside the ZANJIHUB title instead.
@@ -13536,6 +13567,11 @@ function Library:CreateWindow(WindowInfo)
                 TweenInfo.new(0.10),
                 { Thickness = 2.25, Transparency = 0 }
             ):Play()
+            TweenService:Create(
+                VioletRingStroke,
+                TweenInfo.new(0.10),
+                { Thickness = 3.5, Transparency = 0 }
+            ):Play()
             tweenScale(1.08, 0.10)
         end)
 
@@ -13546,8 +13582,13 @@ function Library:CreateWindow(WindowInfo)
                 TweenInfo.new(0.10),
                 {
                     Thickness = math.clamp(Holder.AbsoluteSize.X / 34, 1.2, 2),
-                    Transparency = 0.18,
+                    Transparency = 0,
                 }
+            ):Play()
+            TweenService:Create(
+                VioletRingStroke,
+                TweenInfo.new(0.10),
+                { Thickness = 3, Transparency = 0 }
             ):Play()
             tweenScale(1, 0.10)
         end)
