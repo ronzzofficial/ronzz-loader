@@ -2073,7 +2073,7 @@ function Library:AddDraggableLabel(...)
 
             IconImage = IconImage or New("ImageLabel", {
                 BackgroundTransparency = 1,
-                ImageColor3 = "FontColor",
+                ImageColor3 = "AccentColor",
                 Size = UDim2.fromOffset(16, 16),
                 ZIndex = 11,
                 Parent = Label,
@@ -2369,7 +2369,7 @@ function Library:AddDraggableImageButton(...)
         AnchorPoint = Vector2.new(0.5, 0.5),
         Position = UDim2.fromScale(0.5, 0.5),
         Size = UDim2.fromOffset(IconSize, IconSize),
-        ImageColor3 = "FontColor",
+                ImageColor3 = "AccentColor",
         ZIndex = 11,
         Parent = Button,
     })
@@ -3323,7 +3323,7 @@ do
 
             local CheckImage = New("ImageLabel", {
                 Image = CheckIcon and CheckIcon.Url or "",
-                ImageColor3 = "FontColor",
+                ImageColor3 = "AccentColor",
                 ImageRectOffset = CheckIcon and CheckIcon.ImageRectOffset or Vector2.zero,
                 ImageRectSize = CheckIcon and CheckIcon.ImageRectSize or Vector2.zero,
                 ImageTransparency = 1,
@@ -4369,7 +4369,7 @@ do
             })
             New("ImageLabel", {
                 Image = ResizeIcon and ResizeIcon.Url or "",
-                ImageColor3 = "FontColor",
+                ImageColor3 = "AccentColor",
                 ImageRectOffset = ResizeIcon and ResizeIcon.ImageRectOffset or Vector2.zero,
                 ImageRectSize = ResizeIcon and ResizeIcon.ImageRectSize or Vector2.zero,
                 ImageTransparency = 0.5,
@@ -5020,6 +5020,22 @@ do
             Data.Idx = select(3, ...) or nil
         end
 
+        local function FormatSemanticLabelText(Value)
+            if type(ZanjiColorizeSemanticText) == "function" then
+                local ok, formatted = pcall(
+                    ZanjiColorizeSemanticText,
+                    Value,
+                    "Auto"
+                )
+                if ok and formatted ~= nil then
+                    return tostring(formatted)
+                end
+            end
+            return tostring(Value or "")
+        end
+
+        Data.Text = FormatSemanticLabelText(Data.Text)
+
         local Groupbox = self
         local Container = Groupbox.Container
 
@@ -5073,8 +5089,9 @@ do
         end
 
         function Label:SetText(Text: string)
-            Label.Text = Text
-            TextLabel.Text = Text
+            local DisplayText = FormatSemanticLabelText(Text)
+            Label.Text = DisplayText
+            TextLabel.Text = DisplayText
 
             Label:Display()
             Groupbox:Resize()
@@ -5634,7 +5651,7 @@ do
 
         local CheckImage = New("ImageLabel", {
             Image = CheckIcon and CheckIcon.Url or "",
-            ImageColor3 = "FontColor",
+                ImageColor3 = "AccentColor",
             ImageRectOffset = CheckIcon and CheckIcon.ImageRectOffset or Vector2.zero,
             ImageRectSize = CheckIcon and CheckIcon.ImageRectSize or Vector2.zero,
             ImageTransparency = 1,
@@ -6891,7 +6908,6 @@ do
 
         local Display = New("TextButton", {
             Active = not Dropdown.Disabled,
-            RichText = true,
             AnchorPoint = Vector2.new(0, 1),
             BackgroundColor3 = "MainColor",
             BorderColor3 = "OutlineColor",
@@ -6899,6 +6915,7 @@ do
             Position = UDim2.fromScale(0, 1),
             Size = UDim2.new(1, 0, 0, 21),
             Text = "---",
+            RichText = true,
             TextSize = 14,
             TextTruncate = Enum.TextTruncate.AtEnd,
             TextXAlignment = Enum.TextXAlignment.Left,
@@ -6925,7 +6942,7 @@ do
         local ArrowImage = New("ImageLabel", {
             AnchorPoint = Vector2.new(1, 0.5),
             Image = ArrowIcon and ArrowIcon.Url or "",
-            ImageColor3 = "FontColor",
+                ImageColor3 = "AccentColor",
             ImageRectOffset = ArrowIcon and ArrowIcon.ImageRectOffset or Vector2.zero,
             ImageRectSize = ArrowIcon and ArrowIcon.ImageRectSize or Vector2.zero,
             ImageTransparency = 0.5,
@@ -7978,6 +7995,30 @@ do
     
             Type = "Dropdown",
         }
+
+        local function FormatZanjiDropdownValue(Value)
+            if type(Info.FormatDisplayValue) == "function" then
+                local ok, formatted = pcall(Info.FormatDisplayValue, Value)
+                if ok and formatted ~= nil then
+                    return tostring(formatted)
+                end
+            end
+
+            if type(ZanjiFormatDropdownOption) == "function" then
+                local ok, formatted = pcall(
+                    ZanjiFormatDropdownOption,
+                    Dropdown.Text,
+                    Value,
+                    Info.ZanjiColorKind,
+                    Info.ZanjiSemanticDetails
+                )
+                if ok and formatted ~= nil then
+                    return tostring(formatted)
+                end
+            end
+
+            return tostring(Value)
+        end
     
         local Holder = New("Frame", {
             BackgroundTransparency = 1,
@@ -8005,6 +8046,7 @@ do
             Position = UDim2.fromScale(0, 1),
             Size = UDim2.new(1, 0, 0, 21),
             Text = "---",
+            RichText = true,
             TextSize = 14,
             TextTruncate = Enum.TextTruncate.AtEnd,
             TextXAlignment = Enum.TextXAlignment.Left,
@@ -8031,7 +8073,7 @@ do
         local ArrowImage = New("ImageLabel", {
             AnchorPoint = Vector2.new(1, 0.5),
             Image = ArrowIcon and ArrowIcon.Url or "",
-            ImageColor3 = "FontColor",
+                ImageColor3 = "AccentColor",
             ImageRectOffset = ArrowIcon and ArrowIcon.ImageRectOffset or Vector2.zero,
             ImageRectSize = ArrowIcon and ArrowIcon.ImageRectSize or Vector2.zero,
             ImageTransparency = 0.5,
@@ -8379,7 +8421,7 @@ do
             Entry.Button.BackgroundColor3 = Library.Scheme.MainColor:Lerp(Library.Scheme.AccentColor, 0.15)
             Entry.Button.BackgroundTransparency = selected and 0.5 or 1 
             Entry.Button.TextTransparency = Entry.Disabled and 0.8 or (selected and 0.04 or 0.45)
-            Entry.Button.Text = tostring(Entry.Value)
+            Entry.Button.Text = FormatZanjiDropdownValue(Entry.Value)
         end
     
         local function RefreshButtons()
@@ -8470,6 +8512,7 @@ do
                 LayoutOrder = LayoutOrder or 0,
                 Size = UDim2.new(1, -8, 0, CurrentRowHeight),
                 Text = "",
+                RichText = true,
                 TextSize = CurrentOptionTextSize,
                 TextXAlignment = Enum.TextXAlignment.Left,
                 ZIndex = 123,
@@ -8639,15 +8682,12 @@ do
             if Info.Multi then
                 for _, Value in pairs(Dropdown.Values) do
                     if Dropdown.Value[Value] then
-                        Str = Str .. (Info.FormatDisplayValue and tostring(Info.FormatDisplayValue(Value)) or tostring(Value)) .. ", "
+                        Str = Str .. FormatZanjiDropdownValue(Value) .. ", "
                     end
                 end
                 Str = Str:sub(1, #Str - 2)
             else
-                Str = Dropdown.Value and tostring(Dropdown.Value) or ""
-                if Str ~= "" and Info.FormatDisplayValue then
-                    Str = tostring(Info.FormatDisplayValue(Str))
-                end
+                Str = Dropdown.Value and FormatZanjiDropdownValue(Dropdown.Value) or ""
             end
     
             Display.Text = (Str == "" and "---" or Str)
@@ -10129,7 +10169,7 @@ function Library:Notify(...)
                 Position = UDim2.new(0, 0, 0.5, 1),
                 Size = UDim2.fromOffset(15, 15),
                 Image = ParsedIcon.Url,
-                ImageColor3 = Data.IconColor or "FontColor",
+                ImageColor3 = Data.IconColor or "AccentColor",
                 ImageRectOffset = ParsedIcon.ImageRectOffset,
                 ImageRectSize = ParsedIcon.ImageRectSize,
                 Parent = TitleContainer,
@@ -10651,7 +10691,7 @@ function Library:CreateWindow(WindowInfo)
         if SearchIcon then
             New("ImageLabel", {
                 Image = SearchIcon.Url,
-                ImageColor3 = "FontColor",
+                ImageColor3 = "AccentColor",
                 ImageRectOffset = SearchIcon.ImageRectOffset,
                 ImageRectSize = SearchIcon.ImageRectSize,
                 ImageTransparency = 0.5,
@@ -10737,7 +10777,7 @@ function Library:CreateWindow(WindowInfo)
 
         New("ImageLabel", {
             Image = ResizeIcon and ResizeIcon.Url or "",
-            ImageColor3 = "FontColor",
+                ImageColor3 = "AccentColor",
             ImageRectOffset = ResizeIcon and ResizeIcon.ImageRectOffset or Vector2.zero,
             ImageRectSize = ResizeIcon and ResizeIcon.ImageRectSize or Vector2.zero,
             ImageTransparency = 0.5,
@@ -12784,7 +12824,7 @@ function Library:CreateWindow(WindowInfo)
                     BackgroundTransparency = 1,
                     Size = UDim2.fromOffset(16, 16),
                     Image = ParsedIcon.Url,
-                    ImageColor3 = Info.TitleColor or "FontColor",
+                    ImageColor3 = Info.TitleColor or "AccentColor",
                     ImageRectOffset = ParsedIcon.ImageRectOffset,
                     ImageRectSize = ParsedIcon.ImageRectSize,
                     LayoutOrder = 1,
