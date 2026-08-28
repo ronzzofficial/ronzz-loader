@@ -125,6 +125,9 @@ local SOURCE_ROUTE =
 local VALIDATE_ROUTE =
     "/v1/license/validate"
 
+local WHITELIST_ACTIVATE_ROUTE =
+    "/v1/whitelist/activate"
+
 local CONFIG_ROUTE =
     "/v1/config/zanji_v2"
 
@@ -138,6 +141,9 @@ local KEY_FILE =
 -- set the Worker variable ZANJI_KEY_SYSTEM_ENABLED instead.
 local ZANJI_KEY_SYSTEM_ENABLED =
     true
+
+local ZANJI_ACCESS_MODE =
+    "key"
 
 --==================================================
 -- CLEAN
@@ -288,7 +294,7 @@ end
 -- RELEASE MODE
 --==================================================
 
-local function FetchKeySystemMode()
+local function FetchAccessMode()
 
     local response, requestError =
         SendRequest({
@@ -334,7 +340,20 @@ local function FetchKeySystemMode()
             .. ")."
     end
 
-    return decoded.keySystemEnabled
+    local mode =
+        Clean(decoded.accessMode):lower()
+
+    if mode ~= "whitelist"
+    and mode ~= "key"
+    and mode ~= "public" then
+        mode = decoded.keySystemEnabled
+            and "key"
+            or "public"
+    end
+
+    return decoded.keySystemEnabled,
+        nil,
+        mode
 end
 
 --==================================================
@@ -418,6 +437,21 @@ local function FormatApiError(
 
         account_not_linked =
             "This Roblox account is not linked to this key.",
+
+        whitelist_not_found =
+            "This Roblox account is not whitelisted. Complete payment using your exact username.",
+
+        whitelist_not_activated =
+            "Your paid access is waiting for activation. Execute the loader again.",
+
+        whitelist_expired =
+            "Your ZANJI whitelist access has expired.",
+
+        whitelist_revoked =
+            "Your ZANJI whitelist access was revoked.",
+
+        whitelist_mode_disabled =
+            "Whitelist mode is currently unavailable.",
 
         product_not_allowed =
             "This key cannot access ZanjiHub.",
@@ -574,6 +608,81 @@ local function ActivateKey(key)
 end
 
 --==================================================
+-- ACTIVATE WHITELIST
+--==================================================
+
+local function ActivateWhitelist()
+    local body =
+        HttpService:JSONEncode({
+            Product = PRODUCT,
+            RobloxUserId =
+                tostring(LocalPlayer.UserId),
+            RobloxUsername =
+                tostring(LocalPlayer.Name),
+            PlaceId =
+                tostring(game.PlaceId),
+            UniverseId =
+                tostring(game.GameId),
+        })
+
+    local response, requestError =
+        SendRequest({
+            Url =
+                API
+                .. WHITELIST_ACTIVATE_ROUTE,
+            Method = "POST",
+            Headers = {
+                ["Content-Type"] =
+                    "application/json",
+                ["Accept"] =
+                    "application/json",
+                ["Accept-Encoding"] =
+                    "identity",
+                ["Cache-Control"] =
+                    "no-cache",
+            },
+            Body = body,
+        })
+
+    if not response then
+        return nil,
+            "Whitelist check failed: "
+            .. tostring(requestError)
+    end
+
+    local decoded =
+        DecodeJson(response.Body)
+
+    if not response.Success
+    or type(decoded) ~= "table"
+    or decoded.ok ~= true then
+        return nil,
+            FormatApiError(
+                decoded,
+                "Whitelist check failed with HTTP "
+                .. tostring(response.StatusCode)
+            )
+    end
+
+    local token =
+        Clean(
+            decoded.accessToken
+            or decoded.access_token
+            or decoded.token
+        )
+
+    if token == "" then
+        return nil,
+            "The whitelist service returned no access token."
+    end
+
+    return {
+        Token = token,
+        Activation = decoded,
+    }
+end
+
+--==================================================
 -- DOWNLOAD SOURCE
 --==================================================
 
@@ -680,8 +789,9 @@ local function DownloadSource(session)
 end
 
 local loadedKeySystemMode,
-    keySystemModeError =
-    FetchKeySystemMode()
+    keySystemModeError,
+    loadedAccessMode =
+    FetchAccessMode()
 
 if type(loadedKeySystemMode) ~= "boolean" then
 
@@ -708,6 +818,22 @@ end
 
 ZANJI_KEY_SYSTEM_ENABLED =
     loadedKeySystemMode
+
+ZANJI_ACCESS_MODE =
+    tostring(
+        loadedAccessMode
+        or (
+            loadedKeySystemMode
+            and "key"
+            or "public"
+        )
+    )
+
+Environment.ZANJI_ACCESS_MODE =
+    ZANJI_ACCESS_MODE
+
+_G.ZANJI_ACCESS_MODE =
+    ZANJI_ACCESS_MODE
 
 Environment.ZANJI_KEY_SYSTEM_ENABLED =
     ZANJI_KEY_SYSTEM_ENABLED
@@ -1173,6 +1299,77 @@ local function RunWithKey(key)
             Channel = "public",
         }
     end
+
+    return success, errorMessage
+end
+
+--==================================================
+-- RUN WITH WHITELIST
+--==================================================
+
+local function RunWithWhitelist()
+    local session, activationError =
+        ActivateWhitelist()
+
+    if not session then
+        return false,
+            activationError
+    end
+
+    local source, sourceError =
+        DownloadSource(session)
+
+    if not source then
+        return false,
+            sourceError
+    end
+
+    local refreshed, refreshError =
+        RefreshLiveSession(session)
+
+    if not refreshed then
+        local replacementSession,
+            replacementError =
+            ActivateWhitelist()
+
+        if not replacementSession then
+            return false,
+                replacementError
+                or refreshError
+                or "Unable to refresh the ZANJI whitelist session."
+        end
+
+        session = replacementSession
+    end
+
+    InstallAuth(session)
+
+    local success, errorMessage =
+        CompileAndRun(source)
+
+    if success then
+        Environment.ZANJI_LOADER_RUNTIME = {
+            JobId = game.JobId,
+            Loading = false,
+            Loaded = true,
+            Channel = "whitelist",
+        }
+    else
+        Environment.ZANJI_AUTH_SESSION = nil
+        _G.ZANJI_AUTH_SESSION = nil
+        Environment.ZANJI_LOADER_AUTHORIZED = false
+        _G.ZANJI_LOADER_AUTHORIZED = false
+
+        Environment.ZANJI_LOADER_RUNTIME = {
+            JobId = game.JobId,
+            Loading = false,
+            Loaded = false,
+            Channel = "whitelist",
+        }
+    end
+
+    _G.ZANJI_LOADER_RUNTIME =
+        Environment.ZANJI_LOADER_RUNTIME
 
     return success, errorMessage
 end
@@ -1770,6 +1967,118 @@ local function CreateKeyWindow(
 end
 
 
+local function CreateWhitelistWindow(initialMessage)
+    local parent = GetUiParent()
+    local old =
+        parent:FindFirstChild(
+            "ZANJI_Whitelist_UI"
+        )
+
+    if old then
+        old:Destroy()
+    end
+
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "ZANJI_Whitelist_UI"
+    gui.IgnoreGuiInset = true
+    gui.ResetOnSpawn = false
+    gui.DisplayOrder = 999999
+    gui.Parent = parent
+
+    local window = Instance.new("Frame")
+    window.AnchorPoint = Vector2.new(0.5, 0.5)
+    window.Position = UDim2.fromScale(0.5, 0.5)
+    window.Size = UDim2.fromOffset(440, 205)
+    window.BackgroundColor3 = ZANJI_UI.Surface
+    window.BorderSizePixel = 0
+    window.Active = true
+    window.Draggable = true
+    window.Parent = gui
+    AddCorner(window, 9)
+    AddStroke(window, ZANJI_UI.Border, 1, 0.05)
+
+    local title = Instance.new("TextLabel")
+    title.Position = UDim2.fromOffset(22, 18)
+    title.Size = UDim2.new(1, -44, 0, 24)
+    title.BackgroundTransparency = 1
+    title.Font = Enum.Font.GothamBold
+    title.Text = "ZANJIHUB WHITELIST ACCESS"
+    title.TextColor3 = ZANJI_UI.Text
+    title.TextSize = 17
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.Parent = window
+
+    local account = Instance.new("TextLabel")
+    account.Position = UDim2.fromOffset(22, 47)
+    account.Size = UDim2.new(1, -44, 0, 20)
+    account.BackgroundTransparency = 1
+    account.Font = Enum.Font.Gotham
+    account.Text = "Roblox account: @" .. tostring(LocalPlayer.Name)
+    account.TextColor3 = ZANJI_UI.Muted
+    account.TextSize = 12
+    account.TextXAlignment = Enum.TextXAlignment.Left
+    account.Parent = window
+
+    local status = Instance.new("TextLabel")
+    status.Position = UDim2.fromOffset(22, 76)
+    status.Size = UDim2.new(1, -44, 0, 50)
+    status.BackgroundTransparency = 1
+    status.Font = Enum.Font.Gotham
+    status.Text = tostring(
+        initialMessage
+        or "Complete PayMongo payment using your exact Roblox username."
+    )
+    status.TextColor3 = ZANJI_UI.Muted
+    status.TextSize = 12
+    status.TextWrapped = true
+    status.TextXAlignment = Enum.TextXAlignment.Left
+    status.TextYAlignment = Enum.TextYAlignment.Top
+    status.Parent = window
+
+    local button = Instance.new("TextButton")
+    button.Position = UDim2.fromOffset(22, 143)
+    button.Size = UDim2.new(1, -44, 0, 40)
+    button.BackgroundColor3 = ZANJI_UI.Accent
+    button.BorderSizePixel = 0
+    button.Font = Enum.Font.GothamBold
+    button.Text = "CHECK WHITELIST AGAIN"
+    button.TextColor3 = Color3.fromRGB(255, 255, 255)
+    button.TextSize = 13
+    button.Parent = window
+    AddCorner(button, 6)
+
+    local busy = false
+
+    button.MouseButton1Click:Connect(function()
+        if busy then
+            return
+        end
+
+        busy = true
+        button.Active = false
+        button.Text = "CHECKING..."
+        status.Text = "Checking paid whitelist access..."
+
+        task.spawn(function()
+            local success, err =
+                RunWithWhitelist()
+
+            if success then
+                status.Text = "Access confirmed. Loading ZANJI..."
+                task.wait(0.1)
+                gui:Destroy()
+                return
+            end
+
+            busy = false
+            button.Active = true
+            button.Text = "CHECK WHITELIST AGAIN"
+            status.Text = tostring(err)
+        end)
+    end)
+end
+
+
 --==================================================
 -- AUTO RE-EXECUTE / REOPEN KEY UI
 -- Called by the private source after a live license
@@ -1813,6 +2122,34 @@ local function ReexecutePublicLoader(
 
     ZanjiAutoReexecuteBusy =
         true
+
+    if ZANJI_ACCESS_MODE == "whitelist" then
+        ResetLoaderRuntimeForRetry(
+            stopReason
+        )
+
+        local success, err =
+            RunWithWhitelist()
+
+        ZanjiAutoReexecuteBusy =
+            false
+
+        if success then
+            return true
+        end
+
+        local message =
+            tostring(
+                err
+                or fallbackMessage
+                or "ZANJI whitelist access is unavailable."
+            )
+
+        CreateWhitelistWindow(message)
+
+        return false,
+            message
+    end
 
     if not ZANJI_KEY_SYSTEM_ENABLED then
 
@@ -1935,6 +2272,26 @@ _G.ZANJI_REEXECUTE_PUBLIC_LOADER =
 --==================================================
 -- START
 --==================================================
+
+if ZANJI_ACCESS_MODE == "whitelist" then
+    local success, err =
+        RunWithWhitelist()
+
+    if success then
+        return
+    end
+
+    warn(
+        "[ZANJI] Whitelist check failed:",
+        tostring(err)
+    )
+
+    CreateWhitelistWindow(
+        tostring(err)
+    )
+
+    return
+end
 
 if not ZANJI_KEY_SYSTEM_ENABLED then
 
