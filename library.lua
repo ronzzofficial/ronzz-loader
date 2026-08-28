@@ -13462,10 +13462,16 @@ function Library:CreateWindow(WindowInfo)
 
         local Button = Instance.new("ImageButton")
         Button.Name = "ZanjiLogoToggle"
-        Button.BackgroundTransparency = 1
+        -- Use the transparent Z artwork and draw the circular shell ourselves.
+        -- The former thumbnail contained a baked-in cyan ring which could not be
+        -- reliably recolored by UIStroke.
+        Button.BackgroundColor3 = Color3.fromRGB(7, 8, 18)
+        Button.BackgroundTransparency = 0
         Button.BorderSizePixel = 0
         Button.Size = UDim2.fromScale(1, 1)
-        Button.Image = "rbxthumb://type=Asset&id=100735693340724&w=420&h=420"
+        Button.Image = "rbxthumb://type=Asset&id=88022909172536&w=420&h=420"
+        Button.ImageColor3 = Color3.new(1, 1, 1)
+        Button.ImageTransparency = 0
         Button.ScaleType = Enum.ScaleType.Fit
         Button.AutoButtonColor = false
         Button.Active = true
@@ -13481,18 +13487,16 @@ function Library:CreateWindow(WindowInfo)
         Stroke.Name = "ZanjiLogoVioletBorder"
         Stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
         Stroke.Color = Color3.fromRGB(168, 85, 247)
-        Stroke.Thickness = 2
+        Stroke.Thickness = 3
         Stroke.Transparency = 0
         Stroke.Parent = Button
 
-        -- The uploaded logo image contains its own thin blue outer ring. A
-        -- normal button outline sits outside that bitmap and cannot cover it,
-        -- so draw a violet circular ring above the image itself.
+        -- A second inner ring keeps the violet edge crisp on every DPI scale.
         local VioletRing = Instance.new("Frame")
         VioletRing.Name = "ZanjiLogoVioletRing"
         VioletRing.AnchorPoint = Vector2.new(0.5, 0.5)
         VioletRing.Position = UDim2.fromScale(0.5, 0.5)
-        VioletRing.Size = UDim2.new(1, -3, 1, -3)
+        VioletRing.Size = UDim2.new(1, -2, 1, -2)
         VioletRing.BackgroundTransparency = 1
         VioletRing.BorderSizePixel = 0
         VioletRing.Active = false
@@ -13507,7 +13511,7 @@ function Library:CreateWindow(WindowInfo)
         VioletRingStroke.Name = "ZanjiLogoVioletOverlayStroke"
         VioletRingStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
         VioletRingStroke.Color = Color3.fromRGB(168, 85, 247)
-        VioletRingStroke.Thickness = 3
+        VioletRingStroke.Thickness = 3.5
         VioletRingStroke.Transparency = 0
         VioletRingStroke.Parent = VioletRing
 
@@ -13692,6 +13696,14 @@ function Library:CreateWindow(WindowInfo)
     Library:GiveSignal(UserInputService.WindowFocusReleased:Connect(function()
         Library.IsRobloxFocused = false
     end))
+
+    -- Expose only the concrete ZANJI window pieces needed by the Garden
+    -- runtime. This avoids repeated PlayerGui/CoreGui descendant scans during
+    -- startup and makes the final reveal noticeably lighter on low-end devices.
+    Window.ZanjiMainFrame = MainFrame
+    Window.ZanjiTitleHolder = TitleHolder
+    Window.ZanjiTitleLabel = WindowTitle
+    Window.ZanjiTitleIcon = WindowIcon
 
     Library.Window = Window
     return Window
