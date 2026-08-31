@@ -1006,6 +1006,11 @@ local function RefreshLiveSession(session)
             decoded.lifetime == true
     end
 
+    if tonumber(decoded.heartbeatSeconds) then
+        session.Activation.heartbeatSeconds =
+            tonumber(decoded.heartbeatSeconds)
+    end
+
     return true
 end
 
@@ -1084,6 +1089,12 @@ local function InstallAuth(session)
         Product = PRODUCT,
         JobId = tostring(game.JobId),
         LastValidationAt = os.clock(),
+        HeartbeatSeconds =
+            math.max(
+                60,
+                tonumber(activation.heartbeatSeconds)
+                or 1800
+            ),
         Lifetime =
             Environment.ZANJI_LOADER_LIFETIME,
     }
