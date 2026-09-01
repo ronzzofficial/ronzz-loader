@@ -20,6 +20,9 @@ local LEGACY_ALLOWED_PLACE_IDS = {
     [126884695634066] =
         true,
 
+    [124977557560410] =
+        true,
+
     [129954712878723] =
         true,
 }
