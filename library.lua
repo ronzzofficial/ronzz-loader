@@ -12009,9 +12009,14 @@ function Library:CreateWindow(WindowInfo)
                     })
                 end
 
-                GroupboxLine = Library:MakeLine(GroupboxHolder, {
-                    LayoutOrder = 1,
+                -- Keep the divider attached to the header instead of placing it
+                -- in the holder's automatic list. The old list-layout line could
+                -- be covered by the first body control after an async resize.
+                GroupboxLine = Library:MakeLine(GroupboxTop, {
+                    AnchorPoint = Vector2.new(0, 1),
+                    Position = UDim2.fromScale(0, 1),
                     Size = UDim2.new(1, 0, 0, 1),
+                    ZIndex = GroupboxTop.ZIndex + 3,
                 })
 
                 GroupboxContainer = New("Frame", {
@@ -12235,7 +12240,9 @@ function Library:CreateWindow(WindowInfo)
                 Groupbox:Hide()
             end
 
-            if Info.DisableCollapsing ~= true and Info.Collapsed == true then
+            -- Every collapsible groupbox starts closed. SetCollapsed only runs
+            -- once, so user-opened sections remain open while changing tabs.
+            if Info.DisableCollapsing ~= true then
                 Groupbox:SetCollapsed(true)
             end
 
