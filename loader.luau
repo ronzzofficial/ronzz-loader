@@ -1995,6 +1995,7 @@ end
 
 
 local function CreateWhitelistWindow(initialMessage)
+    local discordInvite = "https://discord.gg/ywgY5taFYU"
     local parent = GetUiParent()
     local old =
         parent:FindFirstChild(
@@ -2015,7 +2016,7 @@ local function CreateWhitelistWindow(initialMessage)
     local window = Instance.new("Frame")
     window.AnchorPoint = Vector2.new(0.5, 0.5)
     window.Position = UDim2.fromScale(0.5, 0.5)
-    window.Size = UDim2.fromOffset(440, 205)
+    window.Size = UDim2.fromOffset(440, 254)
     window.BackgroundColor3 = ZANJI_UI.Surface
     window.BorderSizePixel = 0
     window.Active = true
@@ -2034,6 +2035,40 @@ local function CreateWhitelistWindow(initialMessage)
     title.TextSize = 17
     title.TextXAlignment = Enum.TextXAlignment.Left
     title.Parent = window
+
+    local closeButton = Instance.new("TextButton")
+    closeButton.Name = "CloseButton"
+    closeButton.AnchorPoint = Vector2.new(1, 0)
+    closeButton.Position = UDim2.new(1, -14, 0, 13)
+    closeButton.Size = UDim2.fromOffset(28, 28)
+    closeButton.BackgroundColor3 = ZANJI_UI.Field
+    closeButton.BorderSizePixel = 0
+    closeButton.AutoButtonColor = false
+    closeButton.Font = Enum.Font.GothamBold
+    closeButton.Text = "X"
+    closeButton.TextColor3 = ZANJI_UI.Muted
+    closeButton.TextSize = 13
+    closeButton.ZIndex = 2
+    closeButton.Parent = window
+    AddCorner(closeButton, 6)
+    AddStroke(closeButton, ZANJI_UI.Border, 1, 0.15)
+
+    -- Keep the title clear of the close button on smaller executor windows.
+    title.Size = UDim2.new(1, -92, 0, 24)
+
+    closeButton.MouseEnter:Connect(function()
+        closeButton.BackgroundColor3 = Color3.fromRGB(71, 35, 42)
+        closeButton.TextColor3 = Color3.fromRGB(255, 124, 137)
+    end)
+
+    closeButton.MouseLeave:Connect(function()
+        closeButton.BackgroundColor3 = ZANJI_UI.Field
+        closeButton.TextColor3 = ZANJI_UI.Muted
+    end)
+
+    closeButton.MouseButton1Click:Connect(function()
+        gui:Destroy()
+    end)
 
     local account = Instance.new("TextLabel")
     account.Position = UDim2.fromOffset(22, 47)
@@ -2073,6 +2108,53 @@ local function CreateWhitelistWindow(initialMessage)
     button.TextSize = 13
     button.Parent = window
     AddCorner(button, 6)
+
+    local discordButton = Instance.new("TextButton")
+    discordButton.Name = "DiscordButton"
+    discordButton.Position = UDim2.fromOffset(22, 192)
+    discordButton.Size = UDim2.new(1, -44, 0, 40)
+    discordButton.BackgroundColor3 = ZANJI_UI.Field
+    discordButton.BorderSizePixel = 0
+    discordButton.AutoButtonColor = false
+    discordButton.Font = Enum.Font.GothamBold
+    discordButton.Text = "ABOUT / COPY DISCORD"
+    discordButton.TextColor3 = ZANJI_UI.Accent
+    discordButton.TextSize = 13
+    discordButton.Parent = window
+    AddCorner(discordButton, 6)
+    AddStroke(discordButton, ZANJI_UI.Border, 1, 0.15)
+
+    discordButton.MouseEnter:Connect(function()
+        discordButton.BackgroundColor3 = ZANJI_UI.Background
+    end)
+
+    discordButton.MouseLeave:Connect(function()
+        discordButton.BackgroundColor3 = ZANJI_UI.Field
+    end)
+
+    discordButton.MouseButton1Click:Connect(function()
+        local copied = false
+        local clipboardFunction =
+            type(setclipboard) == "function" and setclipboard
+            or type(toclipboard) == "function" and toclipboard
+
+        if clipboardFunction then
+            copied = pcall(clipboardFunction, discordInvite)
+        end
+
+        if copied then
+            status.Text = "Discord invite copied: " .. discordInvite
+            discordButton.Text = "DISCORD LINK COPIED!"
+            task.delay(1.5, function()
+                if discordButton and discordButton.Parent then
+                    discordButton.Text = "ABOUT / COPY DISCORD"
+                end
+            end)
+        else
+            status.Text = "Discord: " .. discordInvite
+            discordButton.Text = "DISCORD LINK SHOWN ABOVE"
+        end
+    end)
 
     local busy = false
 
