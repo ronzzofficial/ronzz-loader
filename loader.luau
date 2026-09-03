@@ -2117,7 +2117,7 @@ local function CreateWhitelistWindow(initialMessage)
     discordButton.BorderSizePixel = 0
     discordButton.AutoButtonColor = false
     discordButton.Font = Enum.Font.GothamBold
-    discordButton.Text = "JOIN OUR DISCORD"
+    discordButton.Text = "ABOUT / COPY DISCORD"
     discordButton.TextColor3 = ZANJI_UI.Accent
     discordButton.TextSize = 13
     discordButton.Parent = window
@@ -2147,7 +2147,7 @@ local function CreateWhitelistWindow(initialMessage)
             discordButton.Text = "DISCORD LINK COPIED!"
             task.delay(1.5, function()
                 if discordButton and discordButton.Parent then
-                    discordButton.Text = "JOIN OUR DISCORD"
+                    discordButton.Text = "ABOUT / COPY DISCORD"
                 end
             end)
         else
