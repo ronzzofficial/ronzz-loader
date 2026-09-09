@@ -1,5 +1,5 @@
 --==================================================
--- ZANJI PUBLIC LOADER - STRICT LIVE SESSION REFRESH v4
+-- ZANJI PUBLIC LOADER - LIVE SESSION REFRESH v3
 -- Put this file in your public GitHub repository.
 -- The actual ZANJI source is never stored in this file.
 --==================================================
@@ -136,12 +136,6 @@ local CONFIG_ROUTE =
 
 local USAGE_TRACK_ROUTE =
     "/v1/usage/track"
-
--- Loader-owned live validation. Whitelist mode follows the Worker's
--- one-second heartbeat. Transport failures get a very small retry window,
--- but any explicit auth denial fails closed immediately.
-local MIN_HEARTBEAT_SECONDS = 1
-local MAX_CONSECUTIVE_HEARTBEAT_TRANSPORT_FAILURES = 3
 
 local KEY_FILE =
     "ZanjiHub_Key.txt"
@@ -458,12 +452,6 @@ local function FormatApiError(
 
         whitelist_revoked =
             "Your ZANJI whitelist access was revoked.",
-
-        whitelist_paused =
-            "Your ZANJI whitelist access is paused.",
-
-        whitelist_identity_mismatch =
-            "This Roblox username and user ID do not match the paid whitelist record.",
 
         whitelist_mode_disabled =
             "Whitelist mode is currently unavailable.",
@@ -931,9 +919,7 @@ local function RefreshLiveSession(session)
     or Clean(session.Token) == "" then
 
         return false,
-            "Live session token is missing.",
-            "invalid_access_token",
-            401
+            "Live session token is missing."
     end
 
     local response,
@@ -972,9 +958,7 @@ local function RefreshLiveSession(session)
     if not response then
         return false,
             "Session refresh failed: "
-            .. tostring(requestError),
-            "transport_error",
-            0
+            .. tostring(requestError)
     end
 
     local decoded =
@@ -986,14 +970,6 @@ local function RefreshLiveSession(session)
     or type(decoded) ~= "table"
     or decoded.ok ~= true then
 
-        local code =
-            type(decoded) == "table"
-            and Clean(
-                decoded.error
-                or decoded.code
-            ):lower()
-            or "invalid_refresh_response"
-
         return false,
             FormatApiError(
                 decoded,
@@ -1001,9 +977,7 @@ local function RefreshLiveSession(session)
                     .. tostring(
                         response.StatusCode
                     )
-            ),
-            code,
-            tonumber(response.StatusCode) or 0
+            )
     end
 
     local newToken =
@@ -1015,9 +989,7 @@ local function RefreshLiveSession(session)
 
     if newToken == "" then
         return false,
-            "Session refresh returned no access token.",
-            "invalid_refresh_response",
-            tonumber(response.StatusCode) or 0
+            "Session refresh returned no access token."
     end
 
     session.Token =
@@ -1042,10 +1014,7 @@ local function RefreshLiveSession(session)
             tonumber(decoded.heartbeatSeconds)
     end
 
-    session.LastValidationAt = os.clock()
-
-    return true, nil, nil,
-        tonumber(response.StatusCode) or 200
+    return true
 end
 
 --==================================================
@@ -1125,17 +1094,12 @@ local function InstallAuth(session)
         LastValidationAt = os.clock(),
         HeartbeatSeconds =
             math.max(
-                MIN_HEARTBEAT_SECONDS,
+                60,
                 tonumber(activation.heartbeatSeconds)
                 or 1800
             ),
         Lifetime =
             Environment.ZANJI_LOADER_LIFETIME,
-        AccessMode = ZANJI_ACCESS_MODE,
-        UserId = tonumber(LocalPlayer.UserId) or 0,
-        Username = tostring(LocalPlayer.Name),
-        Alive = true,
-        ConsecutiveTransportFailures = 0,
     }
 
     Environment.ZANJI_AUTH_SESSION =
@@ -1169,189 +1133,6 @@ local function InstallAuth(session)
         features
 end
 
---==================================================
--- LOADER-OWNED LIVE AUTH HEARTBEAT
---==================================================
-
-local HARD_AUTH_ERRORS = {
-    invalid_access_token = true,
-    access_token_expired = true,
-    whitelist_not_found = true,
-    whitelist_not_activated = true,
-    whitelist_expired = true,
-    whitelist_revoked = true,
-    whitelist_paused = true,
-    whitelist_identity_mismatch = true,
-    whitelist_mode_disabled = true,
-    license_expired = true,
-    license_revoked = true,
-    license_paused = true,
-    account_not_linked = true,
-    key_mode_disabled = true,
-}
-
-local function InvalidateLocalAuthorization(reason)
-    local message = tostring(
-        reason
-        or "ZANJI authorization is no longer valid."
-    )
-
-    local currentSession =
-        Environment.ZANJI_AUTH_SESSION
-        or _G.ZANJI_AUTH_SESSION
-
-    if type(currentSession) == "table" then
-        currentSession.Alive = false
-        currentSession.Token = ""
-        currentSession.InvalidReason = message
-    end
-
-    Environment.ZANJI_LOADER_AUTHORIZED = false
-    _G.ZANJI_LOADER_AUTHORIZED = false
-
-    Environment.ZANJI_LICENSE_INVALID_REASON = message
-    _G.ZANJI_LICENSE_INVALID_REASON = message
-
-    local runtimeRoot =
-        Environment.ZANJI_RUNTIME_ROOT
-        or _G.ZANJI_RUNTIME_ROOT
-
-    if type(runtimeRoot) == "table" then
-        runtimeRoot.LicenseValid = false
-        runtimeRoot.Authorized = false
-        runtimeRoot.StopReason = message
-    end
-
-    local runtime =
-        Environment.ZANJI_LOADER_RUNTIME
-        or _G.ZANJI_LOADER_RUNTIME
-
-    if type(runtime) == "table" then
-        runtime.Loading = false
-        runtime.Loaded = false
-        runtime.StopReason = message
-    end
-
-    warn(
-        "[ZANJI] Live authorization stopped:",
-        message
-    )
-end
-
-local function StartLoaderHeartbeat(authSession)
-    if type(authSession) ~= "table"
-    or Clean(authSession.Token) == "" then
-        return false
-    end
-
-    authSession.Alive = true
-    authSession.ConsecutiveTransportFailures = 0
-
-    task.spawn(function()
-        while true do
-            local activeSession =
-                Environment.ZANJI_AUTH_SESSION
-                or _G.ZANJI_AUTH_SESSION
-
-            if activeSession ~= authSession
-            or authSession.Alive ~= true
-            or tostring(authSession.JobId or "") ~= tostring(game.JobId)
-            or Environment.ZANJI_LOADER_AUTHORIZED ~= true then
-                break
-            end
-
-            local heartbeatSeconds =
-                math.max(
-                    MIN_HEARTBEAT_SECONDS,
-                    tonumber(authSession.HeartbeatSeconds)
-                    or 1800
-                )
-
-            task.wait(heartbeatSeconds)
-
-            activeSession =
-                Environment.ZANJI_AUTH_SESSION
-                or _G.ZANJI_AUTH_SESSION
-
-            if activeSession ~= authSession
-            or authSession.Alive ~= true
-            or Environment.ZANJI_LOADER_AUTHORIZED ~= true then
-                break
-            end
-
-            local ok, err, code, statusCode =
-                RefreshLiveSession(authSession)
-
-            if ok then
-                authSession.ConsecutiveTransportFailures = 0
-
-                local workerHeartbeat =
-                    tonumber(
-                        authSession.Activation
-                        and authSession.Activation.heartbeatSeconds
-                    )
-
-                if workerHeartbeat then
-                    authSession.HeartbeatSeconds =
-                        math.max(
-                            MIN_HEARTBEAT_SECONDS,
-                            workerHeartbeat
-                        )
-                end
-            else
-                code = Clean(code):lower()
-                statusCode = tonumber(statusCode) or 0
-
-                local hardFailure =
-                    HARD_AUTH_ERRORS[code] == true
-                    or statusCode == 401
-                    or statusCode == 403
-
-                if hardFailure then
-                    InvalidateLocalAuthorization(
-                        err
-                        or code
-                        or "Authorization rejected."
-                    )
-                    break
-                end
-
-                authSession.ConsecutiveTransportFailures =
-                    tonumber(authSession.ConsecutiveTransportFailures or 0)
-                    + 1
-
-                if authSession.ConsecutiveTransportFailures
-                >= MAX_CONSECUTIVE_HEARTBEAT_TRANSPORT_FAILURES then
-                    InvalidateLocalAuthorization(
-                        err
-                        or "Live authorization could not be verified."
-                    )
-                    break
-                end
-            end
-        end
-    end)
-
-    return true
-end
-
-local function StopInstalledAuthSession(reason)
-    local authSession =
-        Environment.ZANJI_AUTH_SESSION
-        or _G.ZANJI_AUTH_SESSION
-
-    if type(authSession) == "table" then
-        authSession.Alive = false
-        authSession.Token = ""
-        authSession.InvalidReason = tostring(reason or "")
-    end
-
-    Environment.ZANJI_AUTH_SESSION = nil
-    _G.ZANJI_AUTH_SESSION = nil
-    Environment.ZANJI_LOADER_AUTHORIZED = false
-    _G.ZANJI_LOADER_AUTHORIZED = false
-end
-
 local function InstallPublicMode()
 
     Environment.ZANJI_KEY_SYSTEM_ENABLED =
@@ -1366,9 +1147,8 @@ local function InstallPublicMode()
     _G.ZANJI_LOADER_AUTHORIZED =
         false
 
-    StopInstalledAuthSession(
-        "Public mode enabled."
-    )
+    Environment.ZANJI_AUTH_SESSION = nil
+    _G.ZANJI_AUTH_SESSION = nil
 
     Environment.ZANJI_LOADER_OWNER =
         "Public"
@@ -1515,10 +1295,6 @@ local function RunWithKey(key)
 
     InstallAuth(session)
 
-    StartLoaderHeartbeat(
-        Environment.ZANJI_AUTH_SESSION
-    )
-
     SaveKey(key)
 
     local success, errorMessage =
@@ -1537,9 +1313,10 @@ local function RunWithKey(key)
 
         -- A failed private-source execution must not leave an
         -- authorized session behind.
-        StopInstalledAuthSession(
-            "Private source failed to start."
-        )
+        Environment.ZANJI_AUTH_SESSION = nil
+        _G.ZANJI_AUTH_SESSION = nil
+        Environment.ZANJI_LOADER_AUTHORIZED = false
+        _G.ZANJI_LOADER_AUTHORIZED = false
 
         -- Allow retry if loading failed.
         Environment.ZANJI_LOADER_RUNTIME = {
@@ -1594,10 +1371,6 @@ local function RunWithWhitelist()
 
     InstallAuth(session)
 
-    StartLoaderHeartbeat(
-        Environment.ZANJI_AUTH_SESSION
-    )
-
     local success, errorMessage =
         CompileAndRun(source)
 
@@ -1609,9 +1382,10 @@ local function RunWithWhitelist()
             Channel = "whitelist",
         }
     else
-        StopInstalledAuthSession(
-            "Private source failed to start."
-        )
+        Environment.ZANJI_AUTH_SESSION = nil
+        _G.ZANJI_AUTH_SESSION = nil
+        Environment.ZANJI_LOADER_AUTHORIZED = false
+        _G.ZANJI_LOADER_AUTHORIZED = false
 
         Environment.ZANJI_LOADER_RUNTIME = {
             JobId = game.JobId,
