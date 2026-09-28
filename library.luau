@@ -18,7 +18,7 @@ local TweenService: TweenService = cloneref(game:GetService("TweenService"))
 local getgenv = getgenv or function()
     return shared
 end
-local setclipboard = setclipboard or nil
+local setclipboard = setclipboard or toclipboard or nil
 local protectgui = protectgui or (syn and syn.protect_gui) or function() end
 local gethui = gethui or function()
     return CoreGui
@@ -398,6 +398,7 @@ local Templates = {
     Window = {
         Title = "No Title",
         Footer = "No Footer",
+        FooterDiscord = "",
 
         Position = UDim2.fromOffset(6, 6),
         Size = UDim2.fromOffset(720, 600),
@@ -8690,7 +8691,11 @@ local List = New("ScrollingFrame", {
             Entry.Button.TextColor3 = LayeredStyle.MainText
             Entry.Button.TextTransparency = Entry.Disabled and 0.65 or 0
 
-            if RowInfo then
+            local ShowRowInput =
+                RowInfo
+                and (RowInfo.VisibleWhenSelected ~= true or selected)
+
+            if ShowRowInput then
                 EnsureRowInputControls(Entry)
                 LayoutRowInputControls(Entry)
 
@@ -13525,6 +13530,7 @@ function Library:CreateWindow(WindowInfo)
     local BackgroundImage
     local BottomBackground
     local FooterLabel
+    local FooterDiscordButton
     local TopBar
     local UpdateBrandLayout
 
@@ -13923,14 +13929,58 @@ function Library:CreateWindow(WindowInfo)
         )
 
         --// Footer \\-
+        -- ZANJI: version on the left, copyable Discord invite on the right.
         FooterLabel = New("TextLabel", {
             BackgroundTransparency = 1,
-            Size = UDim2.fromScale(1, 1),
+            Position = UDim2.fromOffset(8, 0),
+            Size = UDim2.new(1, -205, 1, 0),
             Text = WindowInfo.Footer,
-            TextSize = 14,
+            TextSize = Library.IsMobile and 12 or 14,
             TextTransparency = 0.5,
+            TextXAlignment = Enum.TextXAlignment.Left,
             Parent = BottomBar,
         })
+
+        FooterDiscordButton = New("TextButton", {
+            AnchorPoint = Vector2.new(1, 0),
+            BackgroundTransparency = 1,
+            Position = UDim2.new(1, -24, 0, 0),
+            Size = UDim2.new(0, Library.IsMobile and 165 or 185, 1, 0),
+            Text = tostring(WindowInfo.FooterDiscord or ""),
+            TextSize = Library.IsMobile and 11 or 13,
+            TextColor3 = "AccentColor",
+            TextTransparency = 0.15,
+            TextXAlignment = Enum.TextXAlignment.Right,
+            Visible = tostring(WindowInfo.FooterDiscord or "") ~= "",
+            Parent = BottomBar,
+        })
+
+        local FooterDiscordSerial = 0
+        FooterDiscordButton.Activated:Connect(function()
+            local invite = tostring(WindowInfo.FooterDiscord or "")
+            if invite == "" then return end
+
+            FooterDiscordSerial += 1
+            local serial = FooterDiscordSerial
+            local copied = false
+            if setclipboard then
+                copied = pcall(setclipboard, invite)
+            end
+
+            FooterDiscordButton.Text = copied and "Copied!" or invite
+            FooterDiscordButton.TextTransparency = copied and 0 or 0.15
+
+            if copied then
+                task.delay(1.2, function()
+                    if FooterDiscordButton
+                    and FooterDiscordButton.Parent
+                    and FooterDiscordSerial == serial then
+                        FooterDiscordButton.Text = tostring(WindowInfo.FooterDiscord or "")
+                        FooterDiscordButton.TextTransparency = 0.15
+                    end
+                end)
+            end
+        end)
 
         --// Resize Button \\--
         if WindowInfo.Resizable then
@@ -14086,6 +14136,16 @@ function Library:CreateWindow(WindowInfo)
 
         FooterLabel.Text = Footer
         WindowInfo.Footer = Footer
+    end
+
+    function Window:SetFooterDiscord(Invite: string)
+        assert(typeof(Invite) == "string", "Expected string for footer Discord got: " .. typeof(Invite))
+
+        WindowInfo.FooterDiscord = Invite
+        if FooterDiscordButton then
+            FooterDiscordButton.Text = Invite
+            FooterDiscordButton.Visible = Invite ~= ""
+        end
     end
 
     function Window:SetAlwaysOnTop(Enabled: boolean)
