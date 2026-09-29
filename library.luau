@@ -13928,32 +13928,59 @@ function Library:CreateWindow(WindowInfo)
             })
         )
 
-        --// Footer \\-
-        -- ZANJI: version on the left, copyable Discord invite on the right.
-        FooterLabel = New("TextLabel", {
+        --// Footer \\--
+        -- ZANJI: centered inline footer, matching Ride A Pet:
+        -- underlined/clickable Discord invite • version text.
+        local FooterRow = New("Frame", {
+            Name = "ZanjiFooterRow",
             BackgroundTransparency = 1,
-            Position = UDim2.fromOffset(8, 0),
-            Size = UDim2.new(1, -205, 1, 0),
-            Text = WindowInfo.Footer,
-            TextSize = Library.IsMobile and 12 or 14,
-            TextTransparency = 0.5,
-            TextXAlignment = Enum.TextXAlignment.Left,
+            Position = UDim2.fromScale(0, 0),
+            Size = UDim2.fromScale(1, 1),
             Parent = BottomBar,
+        })
+
+        New("UIListLayout", {
+            FillDirection = Enum.FillDirection.Horizontal,
+            HorizontalAlignment = Enum.HorizontalAlignment.Center,
+            VerticalAlignment = Enum.VerticalAlignment.Center,
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            Padding = UDim.new(0, 3),
+            Parent = FooterRow,
         })
 
         FooterDiscordButton = New("TextButton", {
             Name = "ZanjiFooterDiscordButton",
-            AnchorPoint = Vector2.new(1, 0),
+            LayoutOrder = 1,
+            AutomaticSize = Enum.AutomaticSize.X,
+            Size = UDim2.new(0, 0, 1, 0),
             BackgroundTransparency = 1,
-            Position = UDim2.new(1, -24, 0, 0),
-            Size = UDim2.new(0, Library.IsMobile and 165 or 185, 1, 0),
-            Text = tostring(WindowInfo.FooterDiscord or ""),
-            TextSize = Library.IsMobile and 11 or 13,
-            TextColor3 = "AccentColor",
+            AutoButtonColor = false,
+            RichText = true,
+            Text = tostring(WindowInfo.FooterDiscord or "") ~= ""
+                and ("<u>" .. tostring(WindowInfo.FooterDiscord or "") .. "</u>")
+                or "",
+            TextSize = Library.IsMobile and 11 or 14,
+            TextColor3 = Color3.fromRGB(172, 158, 224),
             TextTransparency = 0.15,
-            TextXAlignment = Enum.TextXAlignment.Right,
+            TextXAlignment = Enum.TextXAlignment.Center,
             Visible = tostring(WindowInfo.FooterDiscord or "") ~= "",
-            Parent = BottomBar,
+            Parent = FooterRow,
+        })
+
+        FooterLabel = New("TextLabel", {
+            Name = "FooterVersion",
+            LayoutOrder = 2,
+            AutomaticSize = Enum.AutomaticSize.X,
+            Size = UDim2.new(0, 0, 1, 0),
+            BackgroundTransparency = 1,
+            Text = tostring(WindowInfo.Footer or "") ~= ""
+                and (" • " .. tostring(WindowInfo.Footer or ""))
+                or "",
+            TextSize = Library.IsMobile and 11 or 14,
+            TextColor3 = Color3.fromRGB(210, 210, 218),
+            TextTransparency = 0.45,
+            TextXAlignment = Enum.TextXAlignment.Center,
+            Parent = FooterRow,
         })
 
         local FooterDiscordSerial = 0
@@ -13964,13 +13991,17 @@ function Library:CreateWindow(WindowInfo)
             FooterDiscordSerial += 1
             local serial = FooterDiscordSerial
             local copied = false
+            local copyValue = invite:match("^https?://") and invite or ("https://" .. invite)
+
             if type(setclipboard) == "function" then
-                copied = pcall(setclipboard, invite)
+                copied = pcall(setclipboard, copyValue)
             elseif type(toclipboard) == "function" then
-                copied = pcall(toclipboard, invite)
+                copied = pcall(toclipboard, copyValue)
             end
 
-            FooterDiscordButton.Text = copied and "Copied!" or invite
+            FooterDiscordButton.Text = copied
+                and "<u>Copied!</u>"
+                or ("<u>" .. invite .. "</u>")
             FooterDiscordButton.TextTransparency = copied and 0 or 0.15
 
             if copied then
@@ -13978,7 +14009,10 @@ function Library:CreateWindow(WindowInfo)
                     if FooterDiscordButton
                     and FooterDiscordButton.Parent
                     and FooterDiscordSerial == serial then
-                        FooterDiscordButton.Text = tostring(WindowInfo.FooterDiscord or "")
+                        local currentInvite = tostring(WindowInfo.FooterDiscord or "")
+                        FooterDiscordButton.Text = currentInvite ~= ""
+                            and ("<u>" .. currentInvite .. "</u>")
+                            or ""
                         FooterDiscordButton.TextTransparency = 0.15
                     end
                 end)
@@ -14137,8 +14171,10 @@ function Library:CreateWindow(WindowInfo)
     function Window:SetFooter(Footer: string)
         assert(typeof(Footer) == "string", "Expected string for footer got: " .. typeof(Footer))
 
-        FooterLabel.Text = Footer
         WindowInfo.Footer = Footer
+        if FooterLabel then
+            FooterLabel.Text = Footer ~= "" and (" • " .. Footer) or ""
+        end
     end
 
     function Window:SetFooterDiscord(Invite: string)
@@ -14146,7 +14182,7 @@ function Library:CreateWindow(WindowInfo)
 
         WindowInfo.FooterDiscord = Invite
         if FooterDiscordButton then
-            FooterDiscordButton.Text = Invite
+            FooterDiscordButton.Text = Invite ~= "" and ("<u>" .. Invite .. "</u>") or ""
             FooterDiscordButton.Visible = Invite ~= ""
         end
     end
