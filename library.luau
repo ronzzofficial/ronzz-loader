@@ -13942,6 +13942,7 @@ function Library:CreateWindow(WindowInfo)
         })
 
         FooterDiscordButton = New("TextButton", {
+            Name = "ZanjiFooterDiscordButton",
             AnchorPoint = Vector2.new(1, 0),
             BackgroundTransparency = 1,
             Position = UDim2.new(1, -24, 0, 0),
@@ -13963,8 +13964,10 @@ function Library:CreateWindow(WindowInfo)
             FooterDiscordSerial += 1
             local serial = FooterDiscordSerial
             local copied = false
-            if setclipboard then
+            if type(setclipboard) == "function" then
                 copied = pcall(setclipboard, invite)
+            elseif type(toclipboard) == "function" then
+                copied = pcall(toclipboard, invite)
             end
 
             FooterDiscordButton.Text = copied and "Copied!" or invite
@@ -17094,6 +17097,7 @@ function Library:CreateWindow(WindowInfo)
     Window.ZanjiTitleLabel = WindowTitle
     Window.ZanjiTitleIcon = WindowIcon
     Window.ZanjiUpdateBrandLayout = UpdateBrandLayout
+    Window.ZanjiFooterDiscordButton = FooterDiscordButton
 
     Library.Window = Window
     return Window
