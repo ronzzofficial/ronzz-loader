@@ -13983,39 +13983,17 @@ function Library:CreateWindow(WindowInfo)
             Parent = FooterRow,
         })
 
-        local FooterDiscordSerial = 0
         FooterDiscordButton.Activated:Connect(function()
             local invite = tostring(WindowInfo.FooterDiscord or "")
             if invite == "" then return end
 
-            FooterDiscordSerial += 1
-            local serial = FooterDiscordSerial
-            local copied = false
             local copyValue = invite:match("^https?://") and invite or ("https://" .. invite)
+            local copy = type(setclipboard) == "function" and setclipboard
+                or type(toclipboard) == "function" and toclipboard
+                or nil
 
-            if type(setclipboard) == "function" then
-                copied = pcall(setclipboard, copyValue)
-            elseif type(toclipboard) == "function" then
-                copied = pcall(toclipboard, copyValue)
-            end
-
-            FooterDiscordButton.Text = copied
-                and "<u>Copied!</u>"
-                or ("<u>" .. invite .. "</u>")
-            FooterDiscordButton.TextTransparency = copied and 0 or 0.15
-
-            if copied then
-                task.delay(1.2, function()
-                    if FooterDiscordButton
-                    and FooterDiscordButton.Parent
-                    and FooterDiscordSerial == serial then
-                        local currentInvite = tostring(WindowInfo.FooterDiscord or "")
-                        FooterDiscordButton.Text = currentInvite ~= ""
-                            and ("<u>" .. currentInvite .. "</u>")
-                            or ""
-                        FooterDiscordButton.TextTransparency = 0.15
-                    end
-                end)
+            if type(copy) == "function" then
+                pcall(copy, copyValue)
             end
         end)
 
