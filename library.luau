@@ -1,4 +1,5 @@
 local cloneref = (cloneref or clonereference or function(instance: any)
+-- ZANJI V11.30: smooth circular virtual-row recycling prevents dropdown scroll flicker.
 -- ZANJI V11.29: value-dropdown rows support per-option inline inputs with virtualization-safe commit.
 -- ZANJI V11.28: exact ZANJIHUB brand colors; InlineInput saved label updates only on commit.
 -- ZANJI V11.27: dropdowns support a native inline input using the same field style as AddInput.
@@ -7855,7 +7856,7 @@ local List = New("ScrollingFrame", {
             RowCount = 0,
             LastFirstIndex = -1,
         }
-        local VirtualDropdownThreshold = Library.IsMobile and (tonumber(Info.VirtualDropdownThreshold) or 600) or (tonumber(Info.VirtualDropdownThreshold) or 80)
+        local VirtualDropdownThreshold = tonumber(Info.VirtualDropdownThreshold) or (Library.IsMobile and 64 or 80)
         local VirtualDropdownBuffer = tonumber(Info.VirtualDropdownBuffer) or 8
         
         local function ClearDropdownList()
@@ -8955,13 +8956,23 @@ local List = New("ScrollingFrame", {
             local total = #values
             local rowHeight = math.max(CurrentRowHeight, 1)
             local rowStep = rowHeight + CurrentRowGap
+            local rowCount = math.max(1, tonumber(VirtualState.RowCount) or 1)
 
             if total <= 0 then
                 return
             end
 
-            local firstIndex = math.floor((List.CanvasPosition.Y or 0) / rowStep) + 1
-            firstIndex = math.clamp(firstIndex, 1, total)
+            -- Keep rows above and below the viewport alive. More importantly,
+            -- bind logical indexes to stable circular pool slots so scrolling by
+            -- one item only reuses the single row that left the viewport instead
+            -- of rewriting every visible row (the old source of visual flicker).
+            local visibleFirst = math.floor((List.CanvasPosition.Y or 0) / rowStep) + 1
+            visibleFirst = math.clamp(visibleFirst, 1, total)
+
+            local overscan = math.max(2, math.floor(tonumber(VirtualDropdownBuffer) or 8))
+            local firstIndex = math.max(1, visibleFirst - overscan)
+            local maxStart = math.max(1, total - rowCount + 1)
+            firstIndex = math.min(firstIndex, maxStart)
 
             if not Force and firstIndex == VirtualState.LastFirstIndex then
                 return
@@ -8969,37 +8980,61 @@ local List = New("ScrollingFrame", {
 
             VirtualState.LastFirstIndex = firstIndex
 
-            for row = 1, VirtualState.RowCount do
-                local button = VirtualState.Rows[row]
+            local lastIndex = math.min(total, firstIndex + rowCount - 1)
+            local usedSlots = {}
 
+            for index = firstIndex, lastIndex do
+                local slot = ((index - 1) % rowCount) + 1
+                usedSlots[slot] = true
+
+                local button = VirtualState.Rows[slot]
                 if not button then
-                    button = CreateDropdownButton(row)
+                    button = CreateDropdownButton(slot)
                     button.AnchorPoint = Vector2.zero
-                    VirtualState.Rows[row] = button
+                    VirtualState.Rows[slot] = button
                 end
 
-                local index = firstIndex + row - 1
                 local value = values[index]
+                local disabled = VirtualState.DisabledLookup[value] == true
+                local entry = Buttons[button] or { Button = button }
+                local bindingChanged =
+                    entry.VirtualIndex ~= index
+                    or entry.Value ~= value
+                    or entry.Disabled ~= disabled
 
-                if value == nil then
-                    Buttons[button] = nil
-                    button.Visible = false
-                    continue
+                if bindingChanged then
+                    entry.Value = value
+                    entry.Disabled = disabled
+                    entry.Hovered = false
+                    entry.VirtualIndex = index
                 end
 
-                local entry = Buttons[button] or { Button = button }
-                entry.Value = value
-                entry.Disabled = VirtualState.DisabledLookup[value] == true
-                entry.Hovered = false
                 Buttons[button] = entry
-
                 button.Visible = true
                 button.LayoutOrder = index
                 button.Position = UDim2.fromOffset(8, 8 + ((index - 1) * rowStep))
                 button.Size = UDim2.new(1, -16, 0, rowHeight)
                 button.TextSize = CurrentOptionTextSize
 
-                UpdateEntry(entry)
+                if Force or bindingChanged then
+                    UpdateEntry(entry)
+                end
+            end
+
+            -- Hide only unused pool slots. Retaining their Entry objects avoids
+            -- destroy/recreate churn and lets the slot be reused on the next step.
+            for slot = 1, rowCount do
+                if not usedSlots[slot] then
+                    local button = VirtualState.Rows[slot]
+                    if button then
+                        local entry = Buttons[button]
+                        if entry then
+                            entry.Hovered = false
+                            entry.VirtualIndex = nil
+                        end
+                        button.Visible = false
+                    end
+                end
             end
         end
 
@@ -9027,7 +9062,11 @@ local List = New("ScrollingFrame", {
                 VirtualState.Active = true
                 VirtualState.Values = orderedValues
                 VirtualState.DisabledLookup = disabledLookup
-                VirtualState.RowCount = math.min(#orderedValues, math.max(8, math.floor((tonumber(Info.MaxVisibleDropdownItems) or 8) + VirtualDropdownBuffer)))
+                local visibleRows = math.max(8, math.floor(tonumber(Info.MaxVisibleDropdownItems) or 8))
+                VirtualState.RowCount = math.min(
+                    #orderedValues,
+                    visibleRows + (math.max(2, math.floor(VirtualDropdownBuffer)) * 2)
+                )
                 VirtualState.LastFirstIndex = -1
 
                 ApplyPopupLayout()
@@ -10635,7 +10674,7 @@ local List = New("ScrollingFrame", {
             RowCount = 0,
             LastFirstIndex = -1,
         }
-        local VirtualDropdownThreshold = Library.IsMobile and (tonumber(Info.VirtualDropdownThreshold) or 600) or (tonumber(Info.VirtualDropdownThreshold) or 80)
+        local VirtualDropdownThreshold = tonumber(Info.VirtualDropdownThreshold) or (Library.IsMobile and 64 or 80)
         local VirtualDropdownBuffer = tonumber(Info.VirtualDropdownBuffer) or 8
         
         local function ClearDropdownList()
@@ -11264,13 +11303,23 @@ local List = New("ScrollingFrame", {
             local total = #values
             local rowHeight = math.max(CurrentRowHeight, 1)
             local rowStep = rowHeight + CurrentRowGap
+            local rowCount = math.max(1, tonumber(VirtualState.RowCount) or 1)
 
             if total <= 0 then
                 return
             end
 
-            local firstIndex = math.floor((List.CanvasPosition.Y or 0) / rowStep) + 1
-            firstIndex = math.clamp(firstIndex, 1, total)
+            -- Keep rows above and below the viewport alive. More importantly,
+            -- bind logical indexes to stable circular pool slots so scrolling by
+            -- one item only reuses the single row that left the viewport instead
+            -- of rewriting every visible row (the old source of visual flicker).
+            local visibleFirst = math.floor((List.CanvasPosition.Y or 0) / rowStep) + 1
+            visibleFirst = math.clamp(visibleFirst, 1, total)
+
+            local overscan = math.max(2, math.floor(tonumber(VirtualDropdownBuffer) or 8))
+            local firstIndex = math.max(1, visibleFirst - overscan)
+            local maxStart = math.max(1, total - rowCount + 1)
+            firstIndex = math.min(firstIndex, maxStart)
 
             if not Force and firstIndex == VirtualState.LastFirstIndex then
                 return
@@ -11278,37 +11327,61 @@ local List = New("ScrollingFrame", {
 
             VirtualState.LastFirstIndex = firstIndex
 
-            for row = 1, VirtualState.RowCount do
-                local button = VirtualState.Rows[row]
+            local lastIndex = math.min(total, firstIndex + rowCount - 1)
+            local usedSlots = {}
 
+            for index = firstIndex, lastIndex do
+                local slot = ((index - 1) % rowCount) + 1
+                usedSlots[slot] = true
+
+                local button = VirtualState.Rows[slot]
                 if not button then
-                    button = CreateDropdownButton(row)
+                    button = CreateDropdownButton(slot)
                     button.AnchorPoint = Vector2.zero
-                    VirtualState.Rows[row] = button
+                    VirtualState.Rows[slot] = button
                 end
 
-                local index = firstIndex + row - 1
                 local value = values[index]
+                local disabled = VirtualState.DisabledLookup[value] == true
+                local entry = Buttons[button] or { Button = button }
+                local bindingChanged =
+                    entry.VirtualIndex ~= index
+                    or entry.Value ~= value
+                    or entry.Disabled ~= disabled
 
-                if value == nil then
-                    Buttons[button] = nil
-                    button.Visible = false
-                    continue
+                if bindingChanged then
+                    entry.Value = value
+                    entry.Disabled = disabled
+                    entry.Hovered = false
+                    entry.VirtualIndex = index
                 end
 
-                local entry = Buttons[button] or { Button = button }
-                entry.Value = value
-                entry.Disabled = VirtualState.DisabledLookup[value] == true
-                entry.Hovered = false
                 Buttons[button] = entry
-
                 button.Visible = true
                 button.LayoutOrder = index
                 button.Position = UDim2.fromOffset(8, 8 + ((index - 1) * rowStep))
                 button.Size = UDim2.new(1, -16, 0, rowHeight)
                 button.TextSize = CurrentOptionTextSize
 
-                UpdateEntry(entry)
+                if Force or bindingChanged then
+                    UpdateEntry(entry)
+                end
+            end
+
+            -- Hide only unused pool slots. Retaining their Entry objects avoids
+            -- destroy/recreate churn and lets the slot be reused on the next step.
+            for slot = 1, rowCount do
+                if not usedSlots[slot] then
+                    local button = VirtualState.Rows[slot]
+                    if button then
+                        local entry = Buttons[button]
+                        if entry then
+                            entry.Hovered = false
+                            entry.VirtualIndex = nil
+                        end
+                        button.Visible = false
+                    end
+                end
             end
         end
 
@@ -11336,7 +11409,11 @@ local List = New("ScrollingFrame", {
                 VirtualState.Active = true
                 VirtualState.Values = orderedValues
                 VirtualState.DisabledLookup = disabledLookup
-                VirtualState.RowCount = math.min(#orderedValues, math.max(8, math.floor((tonumber(Info.MaxVisibleDropdownItems) or 8) + VirtualDropdownBuffer)))
+                local visibleRows = math.max(8, math.floor(tonumber(Info.MaxVisibleDropdownItems) or 8))
+                VirtualState.RowCount = math.min(
+                    #orderedValues,
+                    visibleRows + (math.max(2, math.floor(VirtualDropdownBuffer)) * 2)
+                )
                 VirtualState.LastFirstIndex = -1
 
                 ApplyPopupLayout()
