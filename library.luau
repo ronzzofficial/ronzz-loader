@@ -1,4 +1,5 @@
 local cloneref = (cloneref or clonereference or function(instance: any)
+-- ZANJI V11.30: global Fuse-style stable dropdown row recycling; no visible-row rebinding flicker.
 -- ZANJI V11.30: smooth circular virtual-row recycling prevents dropdown scroll flicker.
 -- ZANJI V11.29: value-dropdown rows support per-option inline inputs with virtualization-safe commit.
 -- ZANJI V11.28: exact ZANJIHUB brand colors; InlineInput saved label updates only on commit.
@@ -7857,7 +7858,7 @@ local List = New("ScrollingFrame", {
             LastFirstIndex = -1,
         }
         local VirtualDropdownThreshold = tonumber(Info.VirtualDropdownThreshold) or (Library.IsMobile and 64 or 80)
-        local VirtualDropdownBuffer = tonumber(Info.VirtualDropdownBuffer) or 8
+        local VirtualDropdownBuffer = tonumber(Info.VirtualDropdownBuffer) or 12
         
         local function ClearDropdownList()
             VirtualState.Active = false
@@ -8962,17 +8963,8 @@ local List = New("ScrollingFrame", {
                 return
             end
 
-            -- Keep rows above and below the viewport alive. More importantly,
-            -- bind logical indexes to stable circular pool slots so scrolling by
-            -- one item only reuses the single row that left the viewport instead
-            -- of rewriting every visible row (the old source of visual flicker).
-            local visibleFirst = math.floor((List.CanvasPosition.Y or 0) / rowStep) + 1
-            visibleFirst = math.clamp(visibleFirst, 1, total)
-
-            local overscan = math.max(2, math.floor(tonumber(VirtualDropdownBuffer) or 8))
-            local firstIndex = math.max(1, visibleFirst - overscan)
-            local maxStart = math.max(1, total - rowCount + 1)
-            firstIndex = math.min(firstIndex, maxStart)
+            local firstIndex = math.floor((List.CanvasPosition.Y or 0) / rowStep) + 1
+            firstIndex = math.clamp(firstIndex, 1, total)
 
             if not Force and firstIndex == VirtualState.LastFirstIndex then
                 return
@@ -8980,61 +8972,139 @@ local List = New("ScrollingFrame", {
 
             VirtualState.LastFirstIndex = firstIndex
 
-            local lastIndex = math.min(total, firstIndex + rowCount - 1)
-            local usedSlots = {}
+            local lastIndex = math.min(
+                total,
+                firstIndex + rowCount - 1
+            )
 
-            for index = firstIndex, lastIndex do
-                local slot = ((index - 1) % rowCount) + 1
-                usedSlots[slot] = true
+            -- Stable Fuse-style recycling:
+            -- rows that still represent an index inside the wanted buffered
+            -- range keep their exact button/entry. Only rows that actually
+            -- leave the range become recyclable edge rows.
+            local rowByIndex = {}
+            local freeButtons = {}
 
-                local button = VirtualState.Rows[slot]
+            for row = 1, rowCount do
+                local button = VirtualState.Rows[row]
+
                 if not button then
-                    button = CreateDropdownButton(slot)
+                    button = CreateDropdownButton(row)
                     button.AnchorPoint = Vector2.zero
-                    VirtualState.Rows[slot] = button
+                    VirtualState.Rows[row] = button
                 end
 
-                local value = values[index]
-                local disabled = VirtualState.DisabledLookup[value] == true
-                local entry = Buttons[button] or { Button = button }
-                local bindingChanged =
-                    entry.VirtualIndex ~= index
-                    or entry.Value ~= value
-                    or entry.Disabled ~= disabled
+                local entry = Buttons[button]
+                local currentIndex =
+                    entry
+                    and tonumber(entry.VirtualIndex)
+                    or nil
 
-                if bindingChanged then
-                    entry.Value = value
-                    entry.Disabled = disabled
-                    entry.Hovered = false
-                    entry.VirtualIndex = index
-                end
-
-                Buttons[button] = entry
-                button.Visible = true
-                button.LayoutOrder = index
-                button.Position = UDim2.fromOffset(8, 8 + ((index - 1) * rowStep))
-                button.Size = UDim2.new(1, -16, 0, rowHeight)
-                button.TextSize = CurrentOptionTextSize
-
-                if Force or bindingChanged then
-                    UpdateEntry(entry)
+                if currentIndex
+                    and currentIndex >= firstIndex
+                    and currentIndex <= lastIndex
+                    and rowByIndex[currentIndex] == nil
+                then
+                    rowByIndex[currentIndex] = button
+                else
+                    table.insert(freeButtons, button)
                 end
             end
 
-            -- Hide only unused pool slots. Retaining their Entry objects avoids
-            -- destroy/recreate churn and lets the slot be reused on the next step.
-            for slot = 1, rowCount do
-                if not usedSlots[slot] then
-                    local button = VirtualState.Rows[slot]
-                    if button then
-                        local entry = Buttons[button]
-                        if entry then
-                            entry.Hovered = false
-                            entry.VirtualIndex = nil
+            local freeCursor = 1
+
+            for index = firstIndex, lastIndex do
+                local button = rowByIndex[index]
+
+                if button then
+                    local entry = Buttons[button]
+
+                    if entry then
+                        if Force then
+                            local value = values[index]
+                            local disabled =
+                                VirtualState.DisabledLookup[value] == true
+
+                            entry.Value = value
+                            entry.Disabled = disabled
+                            entry.VirtualIndex = index
+                            UpdateEntry(entry)
                         end
+
+                        button.Visible = true
+                        button.LayoutOrder = index
+                        button.Position =
+                            UDim2.fromOffset(
+                                8,
+                                8 + ((index - 1) * rowStep)
+                            )
+                        button.Size =
+                            UDim2.new(
+                                1,
+                                -16,
+                                0,
+                                rowHeight
+                            )
+                        button.TextSize = CurrentOptionTextSize
+                    end
+                else
+                    button = freeButtons[freeCursor]
+                    freeCursor += 1
+
+                    if button then
+                        local value = values[index]
+                        local entry =
+                            Buttons[button]
+                            or {
+                                Button = button
+                            }
+
+                        -- This recycled row should be outside the visible
+                        -- viewport thanks to the buffer. Update it completely
+                        -- while hidden, then expose it at the new edge.
                         button.Visible = false
+
+                        entry.Value = value
+                        entry.Disabled =
+                            VirtualState.DisabledLookup[value] == true
+                        entry.Hovered = false
+                        entry.VirtualIndex = index
+
+                        Buttons[button] = entry
+
+                        button.LayoutOrder = index
+                        button.Position =
+                            UDim2.fromOffset(
+                                8,
+                                8 + ((index - 1) * rowStep)
+                            )
+                        button.Size =
+                            UDim2.new(
+                                1,
+                                -16,
+                                0,
+                                rowHeight
+                            )
+                        button.TextSize = CurrentOptionTextSize
+
+                        UpdateEntry(entry)
+                        button.Visible = true
                     end
                 end
+            end
+
+            -- Keep unused pooled rows hidden; never destroy/recreate them
+            -- while the user is scrolling.
+            while freeCursor <= #freeButtons do
+                local button = freeButtons[freeCursor]
+                freeCursor += 1
+
+                local entry = Buttons[button]
+                if entry then
+                    entry.Hovered = false
+                    entry.VirtualIndex = nil
+                end
+
+                button.Visible = false
             end
         end
 
@@ -10675,7 +10745,7 @@ local List = New("ScrollingFrame", {
             LastFirstIndex = -1,
         }
         local VirtualDropdownThreshold = tonumber(Info.VirtualDropdownThreshold) or (Library.IsMobile and 64 or 80)
-        local VirtualDropdownBuffer = tonumber(Info.VirtualDropdownBuffer) or 8
+        local VirtualDropdownBuffer = tonumber(Info.VirtualDropdownBuffer) or 12
         
         local function ClearDropdownList()
             VirtualState.Active = false
@@ -11309,17 +11379,8 @@ local List = New("ScrollingFrame", {
                 return
             end
 
-            -- Keep rows above and below the viewport alive. More importantly,
-            -- bind logical indexes to stable circular pool slots so scrolling by
-            -- one item only reuses the single row that left the viewport instead
-            -- of rewriting every visible row (the old source of visual flicker).
-            local visibleFirst = math.floor((List.CanvasPosition.Y or 0) / rowStep) + 1
-            visibleFirst = math.clamp(visibleFirst, 1, total)
-
-            local overscan = math.max(2, math.floor(tonumber(VirtualDropdownBuffer) or 8))
-            local firstIndex = math.max(1, visibleFirst - overscan)
-            local maxStart = math.max(1, total - rowCount + 1)
-            firstIndex = math.min(firstIndex, maxStart)
+            local firstIndex = math.floor((List.CanvasPosition.Y or 0) / rowStep) + 1
+            firstIndex = math.clamp(firstIndex, 1, total)
 
             if not Force and firstIndex == VirtualState.LastFirstIndex then
                 return
@@ -11327,61 +11388,139 @@ local List = New("ScrollingFrame", {
 
             VirtualState.LastFirstIndex = firstIndex
 
-            local lastIndex = math.min(total, firstIndex + rowCount - 1)
-            local usedSlots = {}
+            local lastIndex = math.min(
+                total,
+                firstIndex + rowCount - 1
+            )
 
-            for index = firstIndex, lastIndex do
-                local slot = ((index - 1) % rowCount) + 1
-                usedSlots[slot] = true
+            -- Stable Fuse-style recycling:
+            -- rows that still represent an index inside the wanted buffered
+            -- range keep their exact button/entry. Only rows that actually
+            -- leave the range become recyclable edge rows.
+            local rowByIndex = {}
+            local freeButtons = {}
 
-                local button = VirtualState.Rows[slot]
+            for row = 1, rowCount do
+                local button = VirtualState.Rows[row]
+
                 if not button then
-                    button = CreateDropdownButton(slot)
+                    button = CreateDropdownButton(row)
                     button.AnchorPoint = Vector2.zero
-                    VirtualState.Rows[slot] = button
+                    VirtualState.Rows[row] = button
                 end
 
-                local value = values[index]
-                local disabled = VirtualState.DisabledLookup[value] == true
-                local entry = Buttons[button] or { Button = button }
-                local bindingChanged =
-                    entry.VirtualIndex ~= index
-                    or entry.Value ~= value
-                    or entry.Disabled ~= disabled
+                local entry = Buttons[button]
+                local currentIndex =
+                    entry
+                    and tonumber(entry.VirtualIndex)
+                    or nil
 
-                if bindingChanged then
-                    entry.Value = value
-                    entry.Disabled = disabled
-                    entry.Hovered = false
-                    entry.VirtualIndex = index
-                end
-
-                Buttons[button] = entry
-                button.Visible = true
-                button.LayoutOrder = index
-                button.Position = UDim2.fromOffset(8, 8 + ((index - 1) * rowStep))
-                button.Size = UDim2.new(1, -16, 0, rowHeight)
-                button.TextSize = CurrentOptionTextSize
-
-                if Force or bindingChanged then
-                    UpdateEntry(entry)
+                if currentIndex
+                    and currentIndex >= firstIndex
+                    and currentIndex <= lastIndex
+                    and rowByIndex[currentIndex] == nil
+                then
+                    rowByIndex[currentIndex] = button
+                else
+                    table.insert(freeButtons, button)
                 end
             end
 
-            -- Hide only unused pool slots. Retaining their Entry objects avoids
-            -- destroy/recreate churn and lets the slot be reused on the next step.
-            for slot = 1, rowCount do
-                if not usedSlots[slot] then
-                    local button = VirtualState.Rows[slot]
-                    if button then
-                        local entry = Buttons[button]
-                        if entry then
-                            entry.Hovered = false
-                            entry.VirtualIndex = nil
+            local freeCursor = 1
+
+            for index = firstIndex, lastIndex do
+                local button = rowByIndex[index]
+
+                if button then
+                    local entry = Buttons[button]
+
+                    if entry then
+                        if Force then
+                            local value = values[index]
+                            local disabled =
+                                VirtualState.DisabledLookup[value] == true
+
+                            entry.Value = value
+                            entry.Disabled = disabled
+                            entry.VirtualIndex = index
+                            UpdateEntry(entry)
                         end
+
+                        button.Visible = true
+                        button.LayoutOrder = index
+                        button.Position =
+                            UDim2.fromOffset(
+                                8,
+                                8 + ((index - 1) * rowStep)
+                            )
+                        button.Size =
+                            UDim2.new(
+                                1,
+                                -16,
+                                0,
+                                rowHeight
+                            )
+                        button.TextSize = CurrentOptionTextSize
+                    end
+                else
+                    button = freeButtons[freeCursor]
+                    freeCursor += 1
+
+                    if button then
+                        local value = values[index]
+                        local entry =
+                            Buttons[button]
+                            or {
+                                Button = button
+                            }
+
+                        -- This recycled row should be outside the visible
+                        -- viewport thanks to the buffer. Update it completely
+                        -- while hidden, then expose it at the new edge.
                         button.Visible = false
+
+                        entry.Value = value
+                        entry.Disabled =
+                            VirtualState.DisabledLookup[value] == true
+                        entry.Hovered = false
+                        entry.VirtualIndex = index
+
+                        Buttons[button] = entry
+
+                        button.LayoutOrder = index
+                        button.Position =
+                            UDim2.fromOffset(
+                                8,
+                                8 + ((index - 1) * rowStep)
+                            )
+                        button.Size =
+                            UDim2.new(
+                                1,
+                                -16,
+                                0,
+                                rowHeight
+                            )
+                        button.TextSize = CurrentOptionTextSize
+
+                        UpdateEntry(entry)
+                        button.Visible = true
                     end
                 end
+            end
+
+            -- Keep unused pooled rows hidden; never destroy/recreate them
+            -- while the user is scrolling.
+            while freeCursor <= #freeButtons do
+                local button = freeButtons[freeCursor]
+                freeCursor += 1
+
+                local entry = Buttons[button]
+                if entry then
+                    entry.Hovered = false
+                    entry.VirtualIndex = nil
+                end
+
+                button.Visible = false
             end
         end
 
