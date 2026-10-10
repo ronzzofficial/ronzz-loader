@@ -264,7 +264,7 @@ local Library = {
     OriginalMinSize = Vector2.new(480, 360),
     MinSize = Vector2.new(480, 360),
     DPIScale = 1,
-    CornerRadius = 0,
+    CornerRadius = 5,
 
     --// Scheme \\--
     IsLightTheme = false,
@@ -419,7 +419,7 @@ local Templates = {
         SearchIconOnLeft = false,
         CenterSearchText = false,
 
-        CornerRadius = 0,
+        CornerRadius = 5,
         NotifySide = "Right",
         ShowCustomCursor = true,
 
@@ -1327,10 +1327,14 @@ end
 local function New(ClassName: string, Properties: { [string]: any }): any
     local Instance = Instance.new(ClassName)
 
-    -- ZANJIHUB sharp-edge theme: make ALL library-created corners square.
-    -- Overrides hard-coded 8px corners, pill toggles and any future controls.
-    if ClassName == "UICorner" then
-        Properties.CornerRadius = UDim.new(0, 0)
+    -- Slightly rounded rectangular controls (up to 5 px).
+    -- Preserve genuinely circular UI elements, such as toggle knobs and rails.
+    -- The sidebar's selected-tab corners are specified as 0 separately below.
+    if ClassName == "UICorner" and typeof(Properties.CornerRadius) == "UDim" then
+        local radius = Properties.CornerRadius
+        if radius.Scale == 0 and radius.Offset > 5 then
+            Properties.CornerRadius = UDim.new(0, 5)
+        end
     end
 
     if Templates[ClassName] then
@@ -7496,17 +7500,16 @@ do
             ImageColor3 = LayeredStyle.SecondaryText,
             ImageRectOffset = ArrowIcon and ArrowIcon.ImageRectOffset or Vector2.zero,
             ImageRectSize = ArrowIcon and ArrowIcon.ImageRectSize or Vector2.zero,
-            ImageTransparency = 0.5,
-            -- Parent to Holder so Display's right text padding cannot push the
-            -- chevron inward. This keeps every dropdown arrow at the same
-            -- physical right edge regardless of title/value length.
+            ImageTransparency = 0.28,
+            -- Parent to Holder: the icon stays vertically centered in its field
+            -- and only ~7-8px from the field's actual right border.
             Position = UDim2.new(
                 1,
-                CompactMobileDropdown and -24 or -28,
+                CompactMobileDropdown and -16 or -18,
                 0,
                 (Dropdown.Text and ControlFieldTop or ControlTopPadding) + (ControlFieldHeight / 2)
             ),
-            Size = UDim2.fromOffset(13, 13),
+            Size = UDim2.fromOffset(18, 18),
             ZIndex = 3,
             Parent = Holder,
         })
@@ -9198,7 +9201,7 @@ local List = New("ScrollingFrame", {
 
             Label.TextTransparency = Dropdown.Disabled and 0.8 or 0
             Display.TextTransparency = Dropdown.Disabled and 0.8 or 0
-            ArrowImage.ImageTransparency = Dropdown.Disabled and 0.8 or (MenuState.Active and 0 or 0.5)
+            ArrowImage.ImageTransparency = Dropdown.Disabled and 0.8 or (MenuState.Active and 0 or 0.28)
             ArrowImage.Rotation = MenuState.Active and 180 or 0
         end
 
@@ -9864,16 +9867,16 @@ local List = New("ScrollingFrame", {
             ImageColor3 = LayeredStyle.SecondaryText,
             ImageRectOffset = ArrowIcon and ArrowIcon.ImageRectOffset or Vector2.zero,
             ImageRectSize = ArrowIcon and ArrowIcon.ImageRectSize or Vector2.zero,
-            ImageTransparency = 0.5,
-            -- Same right-edge anchor as every other dropdown. Holder parenting
-            -- avoids the Display UIPadding offset entirely.
+            ImageTransparency = 0.28,
+            -- Keep the 18px chevron in the center of the field, close to its
+            -- right edge, independent of display text padding.
             Position = UDim2.new(
                 1,
-                CompactMobileDropdown and -24 or -28,
+                CompactMobileDropdown and -16 or -18,
                 0,
                 (Dropdown.Text and DropdownFieldTop or DropdownTopPadding) + (DropdownFieldHeight / 2)
             ),
-            Size = UDim2.fromOffset(13, 13),
+            Size = UDim2.fromOffset(18, 18),
             ZIndex = 3,
             Parent = Holder,
         })
@@ -11614,7 +11617,7 @@ local List = New("ScrollingFrame", {
     
             Label.TextTransparency = Dropdown.Disabled and 0.8 or 0
             Display.TextTransparency = Dropdown.Disabled and 0.8 or 0
-            ArrowImage.ImageTransparency = Dropdown.Disabled and 0.8 or (MenuState.Active and 0 or 0.5)
+            ArrowImage.ImageTransparency = Dropdown.Disabled and 0.8 or (MenuState.Active and 0 or 0.28)
             ArrowImage.Rotation = MenuState.Active and 180 or 0
         end
     
@@ -13725,8 +13728,8 @@ function Library:CreateWindow(WindowInfo)
     if typeof(WindowInfo.Font) == "EnumItem" then
         WindowInfo.Font = Font.fromEnum(WindowInfo.Font :: any)
     end
-    -- Force square corners even when the calling script passes CornerRadius = 8.
-    WindowInfo.CornerRadius = 0
+    -- Small, consistent rounded corners without fully pill-shaped boxes.
+    WindowInfo.CornerRadius = math.clamp(WindowInfo.CornerRadius, 0, 5)
 
     --// Old Naming \\--
     if WindowInfo.Compact ~= nil then
@@ -14425,8 +14428,8 @@ function Library:CreateWindow(WindowInfo)
 
     function Window:SetCornerRadius(Radius: number)
         assert(typeof(Radius) == "number", "Expected number for Radius got: " .. typeof(Radius))
-        -- Do not allow window or theme actions to restore rounded corners.
-        Radius = 0
+        -- Window theme updates retain a subtle 5px maximum rounding.
+        Radius = math.clamp(Radius, 0, 5)
 
         local RadiusHalf = UDim.new(0, Radius / 2)
         local RadiusUDim = UDim.new(0, Radius)
@@ -14694,7 +14697,7 @@ function Library:CreateWindow(WindowInfo)
                 LayoutOrder = Order,
                 Parent = Tabs,
             })
-            New("UICorner", { CornerRadius = UDim.new(0, 8), Parent = TabButton })
+            New("UICorner", { CornerRadius = UDim.new(0, 0), Parent = TabButton })
             TabStroke = New("UIStroke", {
                 ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
                 Color = "AccentColor",
@@ -15479,17 +15482,24 @@ function Library:CreateWindow(WindowInfo)
                     Parent = GroupboxHolder,
                 })
 
+                -- Match the compact 36px header rows from the reference.
+                -- Headers with descriptions still grow to fit both lines.
+                local CompactGroupboxHeader = Info.Description == nil
                 GroupboxTop = New("Frame", {
-                    AutomaticSize = Enum.AutomaticSize.Y,
+                    AutomaticSize = CompactGroupboxHeader
+                        and Enum.AutomaticSize.None
+                        or Enum.AutomaticSize.Y,
                     BackgroundTransparency = 1,
-                    Size = UDim2.fromScale(1, 0),
+                    Size = CompactGroupboxHeader
+                        and UDim2.new(1, 0, 0, Library.IsMobile and 34 or 36)
+                        or UDim2.fromScale(1, 0),
                     Parent = GroupboxHolder,
                 })
                 New("UIPadding", {
-                    PaddingBottom = UDim.new(0, Library.IsMobile and 6 or 8),
+                    PaddingBottom = UDim.new(0, Library.IsMobile and 6 or 7),
                     PaddingLeft = UDim.new(0, Library.IsMobile and 8 or 9),
                     PaddingRight = UDim.new(0, Library.IsMobile and 8 or 9),
-                    PaddingTop = UDim.new(0, Library.IsMobile and 6 or 8),
+                    PaddingTop = UDim.new(0, Library.IsMobile and 6 or 7),
                     Parent = GroupboxTop,
                 })
 
@@ -15560,18 +15570,18 @@ function Library:CreateWindow(WindowInfo)
 
                 if Info.DisableCollapsing ~= true then
                     GroupboxCollapseArrow = New("ImageButton", {
-                        AnchorPoint = Vector2.new(1, 0),
+                        AnchorPoint = Vector2.new(1, 0.5),
                         AutoButtonColor = false,
                         BackgroundTransparency = 1,
                         Image = ArrowIcon and ArrowIcon.Url or "",
-                        ImageColor3 = LayeredStyle.SecondaryText,
+                        ImageColor3 = LayeredStyle.MainText,
                         ImageRectOffset = ArrowIcon and ArrowIcon.ImageRectOffset or Vector2.zero,
                         ImageRectSize = ArrowIcon and ArrowIcon.ImageRectSize or Vector2.zero,
-                        ImageTransparency = 0.18,
-                        Rotation = 180,
-                        -- Dedicated right rail keeps every section chevron aligned.
-                        Position = UDim2.new(1, -9, 0, 8),
-                        Size = UDim2.fromOffset(16, 16),
+                        ImageTransparency = 0.04,
+                        Rotation = 0,
+                        -- Vertically centered, larger and aligned near the right edge.
+                        Position = UDim2.new(1, -3, 0.5, 0),
+                        Size = UDim2.fromOffset(19, 19),
                         ZIndex = 6,
                         Parent = GroupboxTop,
                     })
@@ -15583,8 +15593,8 @@ function Library:CreateWindow(WindowInfo)
                     end)
                     GroupboxCollapseArrow.MouseLeave:Connect(function()
                         TweenService:Create(GroupboxCollapseArrow, Library.TweenInfo, {
-                            ImageColor3 = LayeredStyle.SecondaryText,
-                            ImageTransparency = 0.18,
+                            ImageColor3 = LayeredStyle.MainText,
+                            ImageTransparency = 0.04,
                         }):Play()
                     end)
                 end
@@ -15723,7 +15733,12 @@ function Library:CreateWindow(WindowInfo)
             function Groupbox:SetDescription(Description: string | nil)
                 GroupboxDescription.Text = Description or ""
                 GroupboxDescription.Visible = (Description ~= nil)
-
+                local HasDescription = Description ~= nil
+                GroupboxTop.AutomaticSize = HasDescription
+                    and Enum.AutomaticSize.Y or Enum.AutomaticSize.None
+                GroupboxTop.Size = HasDescription
+                    and UDim2.fromScale(1, 0)
+                    or UDim2.new(1, 0, 0, Library.IsMobile and 34 or 36)
                 Groupbox:Resize()
             end
 
@@ -15736,7 +15751,7 @@ function Library:CreateWindow(WindowInfo)
                     CollapseArrowTween = nil
                 end
 
-                local TargetRotation = if Collapsed then 0 else 180
+                local TargetRotation = if Collapsed then 180 else 0
 
                 GroupboxContentShell.Visible = not Collapsed
                 if Library.Animations and Library.Animations.Groupbox then
@@ -16091,7 +16106,7 @@ function Library:CreateWindow(WindowInfo)
                 Text = "",
                 Parent = Tabs,
             })
-            New("UICorner", { CornerRadius = UDim.new(0, 5), Parent = TabButton })
+            New("UICorner", { CornerRadius = UDim.new(0, 0), Parent = TabButton })
             TabStroke = New("UIStroke", {
                 ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
                 Color = "AccentColor",
@@ -17138,7 +17153,7 @@ function Library:CreateWindow(WindowInfo)
         Shadow.Parent = Holder
 
         local ShadowCorner = Instance.new("UICorner")
-        ShadowCorner.CornerRadius = UDim.new(0, 0)
+        ShadowCorner.CornerRadius = UDim.new(1, 0)
         ShadowCorner.Parent = Shadow
 
         local Button = Instance.new("ImageButton")
@@ -17149,6 +17164,7 @@ function Library:CreateWindow(WindowInfo)
         Button.BackgroundColor3 = Color3.fromRGB(7, 8, 18)
         Button.BackgroundTransparency = 0
         Button.BorderSizePixel = 0
+        Button.ClipsDescendants = true
         Button.Size = UDim2.fromScale(1, 1)
         Button.Image = "rbxthumb://type=Asset&id=100735693340724&w=420&h=420"
         Button.ImageColor3 = Color3.new(1, 1, 1)
@@ -17161,7 +17177,7 @@ function Library:CreateWindow(WindowInfo)
         Button.Parent = Holder
 
         local ButtonCorner = Instance.new("UICorner")
-        ButtonCorner.CornerRadius = UDim.new(0, 0)
+        ButtonCorner.CornerRadius = UDim.new(1, 0)
         ButtonCorner.Parent = Button
 
         local Stroke = Instance.new("UIStroke")
@@ -17185,7 +17201,7 @@ function Library:CreateWindow(WindowInfo)
         VioletRing.Parent = Holder
 
         local VioletRingCorner = Instance.new("UICorner")
-        VioletRingCorner.CornerRadius = UDim.new(0, 0)
+        VioletRingCorner.CornerRadius = UDim.new(1, 0)
         VioletRingCorner.Parent = VioletRing
 
         local VioletRingStroke = Instance.new("UIStroke")
