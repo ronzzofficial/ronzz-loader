@@ -264,7 +264,7 @@ local Library = {
     OriginalMinSize = Vector2.new(480, 360),
     MinSize = Vector2.new(480, 360),
     DPIScale = 1,
-    CornerRadius = 2,
+    CornerRadius = 0,
 
     --// Scheme \\--
     IsLightTheme = false,
@@ -419,7 +419,7 @@ local Templates = {
         SearchIconOnLeft = false,
         CenterSearchText = false,
 
-        CornerRadius = 2,
+        CornerRadius = 0,
         NotifySide = "Right",
         ShowCustomCursor = true,
 
@@ -1326,6 +1326,12 @@ end
 
 local function New(ClassName: string, Properties: { [string]: any }): any
     local Instance = Instance.new(ClassName)
+
+    -- ZANJIHUB sharp-edge theme: make ALL library-created corners square.
+    -- Overrides hard-coded 8px corners, pill toggles and any future controls.
+    if ClassName == "UICorner" then
+        Properties.CornerRadius = UDim.new(0, 0)
+    end
 
     if Templates[ClassName] then
         FillInstance(Templates[ClassName], Instance)
@@ -13719,7 +13725,8 @@ function Library:CreateWindow(WindowInfo)
     if typeof(WindowInfo.Font) == "EnumItem" then
         WindowInfo.Font = Font.fromEnum(WindowInfo.Font :: any)
     end
-    WindowInfo.CornerRadius = math.min(WindowInfo.CornerRadius, 20)
+    -- Force square corners even when the calling script passes CornerRadius = 8.
+    WindowInfo.CornerRadius = 0
 
     --// Old Naming \\--
     if WindowInfo.Compact ~= nil then
@@ -14121,8 +14128,10 @@ function Library:CreateWindow(WindowInfo)
                 ImageRectOffset = SearchIcon.ImageRectOffset,
                 ImageRectSize = SearchIcon.ImageRectSize,
                 ImageTransparency = 0.18,
+                -- SearchBox UIPadding already adds 32px on the left;
+                -- offset -22 places the actual icon 10px from the box edge.
                 Position = WindowInfo.SearchIconOnLeft
-                    and UDim2.new(0, 11, 0.5, 0)
+                    and UDim2.new(0, -22, 0.5, 0)
                     or UDim2.new(1, -9, 0.5, 0),
                 Size = UDim2.fromOffset(15, 15),
                 Parent = SearchBox,
@@ -14416,7 +14425,8 @@ function Library:CreateWindow(WindowInfo)
 
     function Window:SetCornerRadius(Radius: number)
         assert(typeof(Radius) == "number", "Expected number for Radius got: " .. typeof(Radius))
-        Radius = math.min(Radius, 20)
+        -- Do not allow window or theme actions to restore rounded corners.
+        Radius = 0
 
         local RadiusHalf = UDim.new(0, Radius / 2)
         local RadiusUDim = UDim.new(0, Radius)
@@ -17128,7 +17138,7 @@ function Library:CreateWindow(WindowInfo)
         Shadow.Parent = Holder
 
         local ShadowCorner = Instance.new("UICorner")
-        ShadowCorner.CornerRadius = UDim.new(1, 0)
+        ShadowCorner.CornerRadius = UDim.new(0, 0)
         ShadowCorner.Parent = Shadow
 
         local Button = Instance.new("ImageButton")
@@ -17151,7 +17161,7 @@ function Library:CreateWindow(WindowInfo)
         Button.Parent = Holder
 
         local ButtonCorner = Instance.new("UICorner")
-        ButtonCorner.CornerRadius = UDim.new(1, 0)
+        ButtonCorner.CornerRadius = UDim.new(0, 0)
         ButtonCorner.Parent = Button
 
         local Stroke = Instance.new("UIStroke")
@@ -17175,7 +17185,7 @@ function Library:CreateWindow(WindowInfo)
         VioletRing.Parent = Holder
 
         local VioletRingCorner = Instance.new("UICorner")
-        VioletRingCorner.CornerRadius = UDim.new(1, 0)
+        VioletRingCorner.CornerRadius = UDim.new(0, 0)
         VioletRingCorner.Parent = VioletRing
 
         local VioletRingStroke = Instance.new("UIStroke")
