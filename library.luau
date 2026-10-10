@@ -879,6 +879,32 @@ local function RestoreDepbox(Box)
     end
 end
 
+local function RestoreGroupbox(Groupbox)
+    if not Groupbox then
+        return
+    end
+
+    for _, ElementInfo in Groupbox.Elements do
+        ElementInfo.Holder.Visible = ElementInfo.Visible ~= false
+
+        if ElementInfo.SubButton then
+            ElementInfo.Base.Visible = ElementInfo.Visible
+            ElementInfo.SubButton.Base.Visible = ElementInfo.SubButton.Visible
+        end
+    end
+
+    for _, Depbox in Groupbox.DependencyBoxes do
+        if not Depbox.Visible then
+            continue
+        end
+
+        RestoreDepbox(Depbox)
+    end
+
+    Groupbox:Resize()
+    Groupbox.BoxHolder.Visible = Groupbox.Visible ~= false
+end
+
 local function ApplySearchToTab(Tab, Search)
     if not Tab then
         return
@@ -889,6 +915,18 @@ local function ApplySearchToTab(Tab, Search)
     --// Loop through Groupboxes to get Elements Info
     for _, Groupbox in Tab.Groupboxes do
         if Groupbox.Visible == false then
+            continue
+        end
+
+        local GroupboxName = tostring(Groupbox.SearchText or ""):lower()
+        local GroupboxDescription = tostring(Groupbox.SearchDescription or ""):lower()
+        local GroupboxMatched =
+            (GroupboxName ~= "" and GroupboxName:find(Search, 1, true) ~= nil)
+            or (GroupboxDescription ~= "" and GroupboxDescription:find(Search, 1, true) ~= nil)
+
+        if GroupboxMatched then
+            RestoreGroupbox(Groupbox)
+            HasVisible = true
             continue
         end
 
@@ -4188,6 +4226,8 @@ do
             PaddingTop = UDim.new(0, 6),
             Parent = ContentHolder,
         })
+
+        Library:MakeCover(BottomBackground, "Top")
 
         --// Footer \\--
         local FooterHeight = Library.IsMobile and 30 or 22
@@ -13868,9 +13908,15 @@ function Library:CreateWindow(WindowInfo)
             BackgroundColor3 = LayeredStyle.TopBar,
             BackgroundTransparency = 0,
             BorderSizePixel = 0,
+            ClipsDescendants = true,
             Size = UDim2.new(1, 0, 0, 48),
             Parent = MainFrame,
         })
+        New("UICorner", {
+            CornerRadius = UDim.new(0, WindowInfo.CornerRadius),
+            Parent = TopBar,
+        })
+        Library:MakeCover(TopBar, "Bottom")
         Library:MakeDraggable(MainFrame, TopBar, false, true)
 
         --// Title \--
@@ -15657,6 +15703,9 @@ function Library:CreateWindow(WindowInfo)
                 BoxHolder = BoxHolder,
                 Holder = GroupboxHolder,
                 Container = GroupboxContainer,
+
+                SearchText = Info.Name,
+                SearchDescription = Info.Description,
 
                 Tab = Tab,
                 DependencyBoxes = {},
