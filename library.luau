@@ -15531,6 +15531,13 @@ function Library:CreateWindow(WindowInfo)
         end
 
         function Tab:AddGroupbox(Info)
+            -- V11.34: keep the single-line login header compact. The V11.33
+            -- nested AutomaticSize.Y frames could enlarge a 36px header to
+            -- nearly 50px despite "Key Verification" fitting on one line.
+            -- Leave all other groupbox headers fully responsive.
+            local CompactLoginHeader = Info.Name == "Key Verification" and
+                (Info.Description == nil or Info.Description == "")
+            local CompactLoginHeaderHeight = Library.IsMobile and 32 or 34
             if typeof(Info.Side) == "string" then
                 local lowerSide = string.lower(Info.Side)
                 if not SideIndex[lowerSide] then
@@ -15595,10 +15602,12 @@ function Library:CreateWindow(WindowInfo)
                 -- Match the compact 36px header rows from the reference.
                 -- Headers with descriptions still grow to fit both lines.
                 GroupboxTop = New("Frame", {
-                    -- At least 36px, but grow if the title/description wraps.
-                    AutomaticSize = Enum.AutomaticSize.Y,
+                    -- Compact login title: fixed height, no nested auto-size gap.
+                    -- Normal groupboxes still grow to fit wrapping/descriptions.
+                    AutomaticSize = CompactLoginHeader and Enum.AutomaticSize.None or Enum.AutomaticSize.Y,
                     BackgroundTransparency = 1,
-                    Size = UDim2.new(1, 0, 0, Library.IsMobile and 34 or 36),
+                    Size = UDim2.new(1, 0, 0,
+                        CompactLoginHeader and CompactLoginHeaderHeight or (Library.IsMobile and 34 or 36)),
                     Parent = GroupboxHolder,
                 })
                 New("UIPadding", {
@@ -15618,7 +15627,10 @@ function Library:CreateWindow(WindowInfo)
                 local ArrowReservedWidth = Info.DisableCollapsing ~= true and 26 or 0
 
                 local HeaderRow = New("Frame", {
-                    AutomaticSize = Enum.AutomaticSize.Y,
+                    -- In the login box, vertically center icon + title as one row.
+                    AnchorPoint = CompactLoginHeader and Vector2.new(0, 0.5) or Vector2.zero,
+                    Position = CompactLoginHeader and UDim2.new(0, 0, 0.5, 0) or UDim2.fromOffset(0, 0),
+                    AutomaticSize = CompactLoginHeader and Enum.AutomaticSize.None or Enum.AutomaticSize.Y,
                     BackgroundTransparency = 1,
                     Size = UDim2.new(1, -ArrowReservedWidth, 0, 22),
                     Parent = GroupboxTop,
@@ -15656,10 +15668,11 @@ function Library:CreateWindow(WindowInfo)
                     Parent = TextsFrame,
                 })
                 New("UIPadding", {
-                    PaddingBottom = UDim.new(0, 2),
+                    -- No stacked vertical padding inside the compact title row.
+                    PaddingBottom = UDim.new(0, CompactLoginHeader and 0 or 2),
                     PaddingLeft = UDim.new(0, 0),
                     PaddingRight = UDim.new(0, 0),
-                    PaddingTop = UDim.new(0, 2),
+                    PaddingTop = UDim.new(0, CompactLoginHeader and 0 or 2),
                     Parent = TextsFrame,
                 })
 
@@ -15879,9 +15892,11 @@ function Library:CreateWindow(WindowInfo)
 
             function Groupbox:SetDescription(Description: string | nil)
                 GroupboxDescription.Text = Description or ""
-                GroupboxDescription.Visible = (Description ~= nil)
-                GroupboxTop.AutomaticSize = Enum.AutomaticSize.Y
-                GroupboxTop.Size = UDim2.new(1, 0, 0, Library.IsMobile and 34 or 36)
+                GroupboxDescription.Visible = (Description ~= nil and Description ~= "")
+                local IsCompactNow = CompactLoginHeader and (Description == nil or Description == "")
+                GroupboxTop.AutomaticSize = IsCompactNow and Enum.AutomaticSize.None or Enum.AutomaticSize.Y
+                GroupboxTop.Size = UDim2.new(1, 0, 0,
+                    IsCompactNow and CompactLoginHeaderHeight or (Library.IsMobile and 34 or 36))
                 Groupbox:Resize()
             end
 
