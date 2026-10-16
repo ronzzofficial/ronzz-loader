@@ -1,3 +1,4 @@
+-- ZANJI V11.35: restored original unmodified groupbox header/layout from original user library.
 -- ZANJI V11.31: responsive key UI text, groupbox headers, and footer without bullet.
 -- ZANJIHUB Obsidian V11.33: centered status cards and grouped icon/title headers.
 local cloneref = (cloneref or clonereference or function(instance: any)
@@ -15531,13 +15532,6 @@ function Library:CreateWindow(WindowInfo)
         end
 
         function Tab:AddGroupbox(Info)
-            -- V11.34: keep the single-line login header compact. The V11.33
-            -- nested AutomaticSize.Y frames could enlarge a 36px header to
-            -- nearly 50px despite "Key Verification" fitting on one line.
-            -- Leave all other groupbox headers fully responsive.
-            local CompactLoginHeader = Info.Name == "Key Verification" and
-                (Info.Description == nil or Info.Description == "")
-            local CompactLoginHeaderHeight = Library.IsMobile and 32 or 34
             if typeof(Info.Side) == "string" then
                 local lowerSide = string.lower(Info.Side)
                 if not SideIndex[lowerSide] then
@@ -15601,13 +15595,15 @@ function Library:CreateWindow(WindowInfo)
 
                 -- Match the compact 36px header rows from the reference.
                 -- Headers with descriptions still grow to fit both lines.
+                local CompactGroupboxHeader = Info.Description == nil
                 GroupboxTop = New("Frame", {
-                    -- Compact login title: fixed height, no nested auto-size gap.
-                    -- Normal groupboxes still grow to fit wrapping/descriptions.
-                    AutomaticSize = CompactLoginHeader and Enum.AutomaticSize.None or Enum.AutomaticSize.Y,
+                    AutomaticSize = CompactGroupboxHeader
+                        and Enum.AutomaticSize.None
+                        or Enum.AutomaticSize.Y,
                     BackgroundTransparency = 1,
-                    Size = UDim2.new(1, 0, 0,
-                        CompactLoginHeader and CompactLoginHeaderHeight or (Library.IsMobile and 34 or 36)),
+                    Size = CompactGroupboxHeader
+                        and UDim2.new(1, 0, 0, Library.IsMobile and 34 or 36)
+                        or UDim2.fromScale(1, 0),
                     Parent = GroupboxHolder,
                 })
                 New("UIPadding", {
@@ -15618,61 +15614,36 @@ function Library:CreateWindow(WindowInfo)
                     Parent = GroupboxTop,
                 })
 
-                -- ZANJI V11.33: a single horizontal row keeps the icon visually
-                -- joined to the title. Both align to the same vertical center,
-                -- regardless of title wrapping or UI scale.
                 local BoxIcon = Library:GetCustomIcon(Info.IconName)
-                local HeaderIconWidth = Library.IsMobile and 16 or 18
-                local HeaderIconGap = 6
-                local ArrowReservedWidth = Info.DisableCollapsing ~= true and 26 or 0
-
-                local HeaderRow = New("Frame", {
-                    -- In the login box, vertically center icon + title as one row.
-                    AnchorPoint = CompactLoginHeader and Vector2.new(0, 0.5) or Vector2.zero,
-                    Position = CompactLoginHeader and UDim2.new(0, 0, 0.5, 0) or UDim2.fromOffset(0, 0),
-                    AutomaticSize = CompactLoginHeader and Enum.AutomaticSize.None or Enum.AutomaticSize.Y,
-                    BackgroundTransparency = 1,
-                    Size = UDim2.new(1, -ArrowReservedWidth, 0, 22),
-                    Parent = GroupboxTop,
-                })
-                New("UIListLayout", {
-                    FillDirection = Enum.FillDirection.Horizontal,
-                    HorizontalAlignment = Enum.HorizontalAlignment.Left,
-                    VerticalAlignment = Enum.VerticalAlignment.Center,
-                    Padding = UDim.new(0, HeaderIconGap),
-                    Parent = HeaderRow,
-                })
-
                 if BoxIcon then
                     New("ImageLabel", {
-                        LayoutOrder = 0,
+                        AnchorPoint = Vector2.new(0, 0.5),
                         Image = BoxIcon.Url,
                         ImageColor3 = "AccentColor",
                         ImageRectOffset = BoxIcon.ImageRectOffset,
                         ImageRectSize = BoxIcon.ImageRectSize,
-                        Size = UDim2.fromOffset(HeaderIconWidth, HeaderIconWidth),
-                        Parent = HeaderRow,
+                        Position = UDim2.fromScale(0, 0.5),
+                        Size = UDim2.fromOffset(Library.IsMobile and 16 or 18, Library.IsMobile and 16 or 18),
+                        Parent = GroupboxTop,
                     })
                 end
 
                 local TextsFrame = New("Frame", {
-                    LayoutOrder = 1,
                     AutomaticSize = Enum.AutomaticSize.Y,
                     BackgroundTransparency = 1,
-                    -- Reserve the actual icon width + 6px only, no extra inset.
-                    Size = UDim2.new(1,
-                        -(BoxIcon and (HeaderIconWidth + HeaderIconGap) or 0), 0, 22),
-                    Parent = HeaderRow,
+                    Position = UDim2.fromOffset(BoxIcon and 22 or 0, 0),
+                    -- Reserve a fixed rail on the right for the collapse arrow.
+                    Size = UDim2.new(1, -38 - (BoxIcon and 22 or 0), 0, 0),
+                    Parent = GroupboxTop,
                 })
                 New("UIListLayout", {
                     Parent = TextsFrame,
                 })
                 New("UIPadding", {
-                    -- No stacked vertical padding inside the compact title row.
-                    PaddingBottom = UDim.new(0, CompactLoginHeader and 0 or 2),
-                    PaddingLeft = UDim.new(0, 0),
-                    PaddingRight = UDim.new(0, 0),
-                    PaddingTop = UDim.new(0, CompactLoginHeader and 0 or 2),
+                    PaddingBottom = UDim.new(0, 3),
+                    PaddingLeft = UDim.new(0, 6),
+                    PaddingRight = UDim.new(0, 6),
+                    PaddingTop = UDim.new(0, 3),
                     Parent = TextsFrame,
                 })
 
@@ -15684,9 +15655,7 @@ function Library:CreateWindow(WindowInfo)
                     TextColor3 = LayeredStyle.MainText,
                     TextSize = Library.IsMobile and 13 or 14,
                     TextWrapped = true,
-                    TextTruncate = Enum.TextTruncate.None,
                     TextXAlignment = Enum.TextXAlignment.Left,
-                    TextYAlignment = Enum.TextYAlignment.Center,
                     Parent = TextsFrame,
                 })
                 New("UIPadding", {
@@ -15695,17 +15664,17 @@ function Library:CreateWindow(WindowInfo)
                 })
 
                 GroupboxDescription = New("TextLabel", {
-                    AutomaticSize = Enum.AutomaticSize.Y,
+                    AutomaticSize = Enum.AutomaticSize.None,
                     BackgroundTransparency = 1,
                     Size = UDim2.new(1, 0, 0, Library.IsMobile and 12 or 14),
                     Text = Info.Description or "",
                     TextColor3 = LayeredStyle.SecondaryText,
                     TextSize = Library.IsMobile and 10 or 11,
                     TextTransparency = 0.12,
-                    TextWrapped = true,
-                    TextTruncate = Enum.TextTruncate.None,
+                    TextWrapped = false,
+                    TextTruncate = Enum.TextTruncate.AtEnd,
                     TextXAlignment = Enum.TextXAlignment.Left,
-                    TextYAlignment = Enum.TextYAlignment.Top,
+                    TextYAlignment = Enum.TextYAlignment.Center,
                     Visible = (Info.Description ~= nil),
                     Parent = TextsFrame,
                 })
@@ -15849,21 +15818,6 @@ function Library:CreateWindow(WindowInfo)
                 end
             end
 
-            -- Header can grow when "Key Access" wraps. Its height must
-            -- contribute to the whole groupbox, just like control rows do.
-            local LastHeaderHeight = -1
-            table.insert(Groupbox.Connections,
-                GroupboxTop:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
-                    if Groupbox.Destroyed then return end
-                    local Height = GroupboxTop.AbsoluteSize.Y
-                    if math.abs(Height - LastHeaderHeight) < 0.5 then return end
-                    LastHeaderHeight = Height
-                    task.defer(function()
-                        if not Groupbox.Destroyed then Groupbox:Resize() end
-                    end)
-                end)
-            )
-
             -- Keep the layered inner container synced with its controls.
             -- UIListLayout.AbsoluteContentSize can update one frame after an element
             -- is inserted; without this signal the outer groupbox may keep its old
@@ -15892,11 +15846,13 @@ function Library:CreateWindow(WindowInfo)
 
             function Groupbox:SetDescription(Description: string | nil)
                 GroupboxDescription.Text = Description or ""
-                GroupboxDescription.Visible = (Description ~= nil and Description ~= "")
-                local IsCompactNow = CompactLoginHeader and (Description == nil or Description == "")
-                GroupboxTop.AutomaticSize = IsCompactNow and Enum.AutomaticSize.None or Enum.AutomaticSize.Y
-                GroupboxTop.Size = UDim2.new(1, 0, 0,
-                    IsCompactNow and CompactLoginHeaderHeight or (Library.IsMobile and 34 or 36))
+                GroupboxDescription.Visible = (Description ~= nil)
+                local HasDescription = Description ~= nil
+                GroupboxTop.AutomaticSize = HasDescription
+                    and Enum.AutomaticSize.Y or Enum.AutomaticSize.None
+                GroupboxTop.Size = HasDescription
+                    and UDim2.fromScale(1, 0)
+                    or UDim2.new(1, 0, 0, Library.IsMobile and 34 or 36)
                 Groupbox:Resize()
             end
 
