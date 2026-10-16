@@ -1,3 +1,4 @@
+-- ZANJI V11.31: responsive key UI text, groupbox headers, and footer without bullet.
 local cloneref = (cloneref or clonereference or function(instance: any)
 -- ZANJI V11.30: global Fuse-style stable dropdown row recycling; no visible-row rebinding flicker.
 -- ZANJI V11.30: smooth circular virtual-row recycling prevents dropdown scroll flicker.
@@ -5147,12 +5148,9 @@ do
 
         Data.Text = FormatSemanticLabelText(Data.Text)
 
-        -- ZANJI V11.2: "wrap" labels only use multiple lines when the
-        -- text explicitly contains a newline. Descriptions/status text stay
-        -- single-line and truncate with ... as the UI becomes narrower.
-        local function HasExplicitLineBreak(Value)
-            return tostring(Value or ""):find("\n", 1, true) ~= nil
-        end
+        -- ZANJI V11.31: a wrapping label must wrap naturally at its CURRENT
+        -- container width. Do not require a literal newline; status messages
+        -- and descriptions often change from one short sentence to many lines.
 
         local Groupbox = self
         local Container = Groupbox.Container
@@ -5180,10 +5178,10 @@ do
             Text = Label.IsDivider and "" or Label.Text,
             TextColor3 = LayeredStyle.MainText,
             TextSize = Data.Size,
-            TextWrapped = Label.DoesWrap and HasExplicitLineBreak(Label.Text),
-            TextTruncate = (Label.DoesWrap and HasExplicitLineBreak(Label.Text)) and Enum.TextTruncate.None or Enum.TextTruncate.AtEnd,
+            TextWrapped = Label.DoesWrap,
+            TextTruncate = Label.DoesWrap and Enum.TextTruncate.None or Enum.TextTruncate.AtEnd,
             TextXAlignment = Groupbox.IsKeyTab and Enum.TextXAlignment.Center or Enum.TextXAlignment.Left,
-            TextYAlignment = (Label.DoesWrap and HasExplicitLineBreak(Label.Text)) and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center,
+            TextYAlignment = Label.DoesWrap and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center,
             Parent = Container,
         })
         New("UICorner", {
@@ -5222,7 +5220,7 @@ do
                 return
             end
 
-            local WrapNow = Label.DoesWrap and HasExplicitLineBreak(Label.Text)
+            local WrapNow = Label.DoesWrap
             TextLabel.TextWrapped = WrapNow
             TextLabel.TextTruncate = WrapNow and Enum.TextTruncate.None or Enum.TextTruncate.AtEnd
             TextLabel.TextYAlignment = WrapNow and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center
@@ -5241,8 +5239,13 @@ do
                 return
             end
 
-            local _, Y = Library:GetTextBounds(Label.Text, TextLabel.FontFace, TextLabel.TextSize, Width)
-            TextLabel.Size = UDim2.new(1, 0, 0, math.max(Library.IsMobile and 26 or 28, Y + (Library.IsMobile and 8 or 10)))
+            -- Exclude the left/right UIPadding from the usable text width.
+            -- A little extra height absorbs Roblox font rounding at small DPI.
+            local PaddingX = Library.IsMobile and 16 or 20
+            local TextWidth = math.max(8, Width / math.max(Library.DPIScale, 0.1) - PaddingX - 4)
+            local _, Y = Library:GetTextBounds(Label.Text, TextLabel.FontFace, TextLabel.TextSize, TextWidth)
+            TextLabel.Size = UDim2.new(1, 0, 0,
+                math.max(Library.IsMobile and 26 or 28, math.ceil(Y) + (Library.IsMobile and 10 or 12)))
         end
 
         function Label:SetVisible(Visible: boolean)
@@ -5264,17 +5267,17 @@ do
         if Label.DoesWrap then
             Label:Display()
 
-            local Last = TextLabel.AbsoluteSize
-            TextLabel:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
-                if TextLabel.AbsoluteSize == Last then
-                    return
-                end
-
+            local LastWidth = -1
+            table.insert(Label.Connections, TextLabel:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+                -- Height changes are a RESULT of wrapping. Only a width
+                -- change needs another measurement; avoids layout feedback.
+                if Label.Destroyed or Groupbox.Destroyed then return end
+                local Width = TextLabel.AbsoluteSize.X
+                if math.abs(Width - LastWidth) < 0.5 then return end
+                LastWidth = Width
                 Label:Display()
-                Last = TextLabel.AbsoluteSize
-
                 Groupbox:Resize()
-            end)
+            end))
         else
             New("UIListLayout", {
                 FillDirection = Enum.FillDirection.Horizontal,
@@ -6437,7 +6440,13 @@ do
 
         -- V11.10 unified control metrics.
         local ControlTopPadding = Library.IsMobile and 5 or 6
-        local ControlLabelHeight = Library.IsMobile and 12 or 14
+        local OriginalControlLabelHeight = Library.IsMobile and 12 or 14
+        local ControlLabelHeight = OriginalControlLabelHeight
+        -- Key-entry labels must never render as ZANJIH... at smaller widths.
+        -- Ordinary input rows keep their original compact single-line layout.
+        local WrapInputTitle = Info.WrapTitle == true or (
+            Info.WrapTitle ~= false and tostring(Info.Text or ""):lower():find("key", 1, true) ~= nil
+        )
         local ControlLabelGap = 3
         local ControlFieldHeight = Library.IsMobile and 25 or 29
         local ControlBottomPadding = Library.IsMobile and 5 or 6
@@ -6471,9 +6480,10 @@ do
             Text = Input.Text,
             TextColor3 = LayeredStyle.MainText,
             TextSize = Library.IsMobile and 12 or 13,
-            TextTruncate = Enum.TextTruncate.AtEnd,
+            TextWrapped = WrapInputTitle,
+            TextTruncate = WrapInputTitle and Enum.TextTruncate.None or Enum.TextTruncate.AtEnd,
             TextXAlignment = Enum.TextXAlignment.Left,
-            TextYAlignment = Enum.TextYAlignment.Center,
+            TextYAlignment = WrapInputTitle and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center,
             ZIndex = 2,
             Parent = Holder,
         })
@@ -6516,11 +6526,30 @@ do
 
         RefreshSavedValueLabel()
 
+        local BoxClip -- initialized below; repositioned when the title grows
+        local function RefreshInputTitleSize()
+            if not WrapInputTitle or Input.Destroyed then return end
+            local Width = Label.AbsoluteSize.X
+            if Width <= 24 then return end -- wait for the groupbox to mount
+            local TextWidth = math.max(12, Width / math.max(Library.DPIScale, 0.1) - 4)
+            local _, TextHeight = Library:GetTextBounds(Label.Text, Label.FontFace, Label.TextSize, TextWidth)
+            local NewLabelHeight = math.max(OriginalControlLabelHeight, math.ceil(TextHeight) + 3)
+            if NewLabelHeight == ControlLabelHeight then return end
+            ControlLabelHeight = NewLabelHeight
+            ControlFieldTop = ControlTopPadding + ControlLabelHeight + ControlLabelGap
+            Holder.Size = UDim2.new(1, 0, 0, ControlFieldTop + ControlFieldHeight + ControlBottomPadding)
+            Label.Size = UDim2.new(1, Library.IsMobile and -16 or -20, 0, ControlLabelHeight)
+            if BoxClip then
+                BoxClip.Position = UDim2.new(0, Library.IsMobile and 8 or 10, 0, ControlFieldTop)
+            end
+            Groupbox:Resize()
+        end
+
         -- ZANJI: every AddInput uses one fixed 30px single-line field.
         -- When unfocused, a clipped TextLabel preview renders long values with
         -- ... at the end. When focused, the real TextBox takes over so editing
         -- and cursor scrolling still work normally.
-        local BoxClip = New("Frame", {
+        BoxClip = New("Frame", {
             AnchorPoint = Vector2.zero,
             BackgroundColor3 = LayeredStyle.InputBox,
             BorderSizePixel = 0,
@@ -6674,6 +6703,7 @@ do
             Box.Text = Text
             RefreshPreview()
             RefreshSavedValueLabel()
+            RefreshInputTitleSize()
 
             if not Input.Disabled then
                 Input:RunChanged()
@@ -6703,6 +6733,7 @@ do
             Input.Text = Text
             Input.BaseText = tostring(Text or "")
             RefreshSavedValueLabel()
+            RefreshInputTitleSize()
         end
 
         if Input.Finished then
@@ -6788,6 +6819,23 @@ do
             Input.TooltipTable.Disabled = Input.Disabled
         end
 
+        if WrapInputTitle then
+            -- React to the actual available width after tab switches/resizing.
+            -- Ignore height-only changes caused by this same resize function.
+            local LastTitleWidth = -1
+            table.insert(Input.Connections, Holder:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+                if Input.Destroyed or Groupbox.Destroyed then return end
+                local Width = Holder.AbsoluteSize.X
+                if math.abs(Width - LastTitleWidth) < 0.5 then return end
+                LastTitleWidth = Width
+                RefreshInputTitleSize()
+            end))
+            task.defer(function()
+                if not Input.Destroyed and not Groupbox.Destroyed then
+                    RefreshInputTitleSize()
+                end
+            end)
+        end
         Groupbox:Resize()
 
         Input.Holder = Holder
@@ -14275,9 +14323,7 @@ function Library:CreateWindow(WindowInfo)
             AutomaticSize = Enum.AutomaticSize.X,
             Size = UDim2.new(0, 0, 1, 0),
             BackgroundTransparency = 1,
-            Text = tostring(WindowInfo.Footer or "") ~= ""
-                and (" • " .. tostring(WindowInfo.Footer or ""))
-                or "",
+            Text = tostring(WindowInfo.Footer or ""):gsub("^%s*•%s*", ""),
             TextSize = Library.IsMobile and 11 or 14,
             TextColor3 = Color3.fromRGB(210, 210, 218),
             TextTransparency = 0.45,
@@ -14451,9 +14497,9 @@ function Library:CreateWindow(WindowInfo)
     function Window:SetFooter(Footer: string)
         assert(typeof(Footer) == "string", "Expected string for footer got: " .. typeof(Footer))
 
-        WindowInfo.Footer = Footer
+        WindowInfo.Footer = Footer:gsub("^%s*•%s*", "")
         if FooterLabel then
-            FooterLabel.Text = Footer ~= "" and (" • " .. Footer) or ""
+            FooterLabel.Text = WindowInfo.Footer
         end
     end
 
@@ -15530,15 +15576,11 @@ function Library:CreateWindow(WindowInfo)
 
                 -- Match the compact 36px header rows from the reference.
                 -- Headers with descriptions still grow to fit both lines.
-                local CompactGroupboxHeader = Info.Description == nil
                 GroupboxTop = New("Frame", {
-                    AutomaticSize = CompactGroupboxHeader
-                        and Enum.AutomaticSize.None
-                        or Enum.AutomaticSize.Y,
+                    -- At least 36px, but grow if the title/description wraps.
+                    AutomaticSize = Enum.AutomaticSize.Y,
                     BackgroundTransparency = 1,
-                    Size = CompactGroupboxHeader
-                        and UDim2.new(1, 0, 0, Library.IsMobile and 34 or 36)
-                        or UDim2.fromScale(1, 0),
+                    Size = UDim2.new(1, 0, 0, Library.IsMobile and 34 or 36),
                     Parent = GroupboxHolder,
                 })
                 New("UIPadding", {
@@ -15590,6 +15632,7 @@ function Library:CreateWindow(WindowInfo)
                     TextColor3 = LayeredStyle.MainText,
                     TextSize = Library.IsMobile and 13 or 14,
                     TextWrapped = true,
+                    TextTruncate = Enum.TextTruncate.None,
                     TextXAlignment = Enum.TextXAlignment.Left,
                     Parent = TextsFrame,
                 })
@@ -15599,17 +15642,17 @@ function Library:CreateWindow(WindowInfo)
                 })
 
                 GroupboxDescription = New("TextLabel", {
-                    AutomaticSize = Enum.AutomaticSize.None,
+                    AutomaticSize = Enum.AutomaticSize.Y,
                     BackgroundTransparency = 1,
                     Size = UDim2.new(1, 0, 0, Library.IsMobile and 12 or 14),
                     Text = Info.Description or "",
                     TextColor3 = LayeredStyle.SecondaryText,
                     TextSize = Library.IsMobile and 10 or 11,
                     TextTransparency = 0.12,
-                    TextWrapped = false,
-                    TextTruncate = Enum.TextTruncate.AtEnd,
+                    TextWrapped = true,
+                    TextTruncate = Enum.TextTruncate.None,
                     TextXAlignment = Enum.TextXAlignment.Left,
-                    TextYAlignment = Enum.TextYAlignment.Center,
+                    TextYAlignment = Enum.TextYAlignment.Top,
                     Visible = (Info.Description ~= nil),
                     Parent = TextsFrame,
                 })
@@ -15753,6 +15796,21 @@ function Library:CreateWindow(WindowInfo)
                 end
             end
 
+            -- Header can grow when "Key Access" wraps. Its height must
+            -- contribute to the whole groupbox, just like control rows do.
+            local LastHeaderHeight = -1
+            table.insert(Groupbox.Connections,
+                GroupboxTop:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+                    if Groupbox.Destroyed then return end
+                    local Height = GroupboxTop.AbsoluteSize.Y
+                    if math.abs(Height - LastHeaderHeight) < 0.5 then return end
+                    LastHeaderHeight = Height
+                    task.defer(function()
+                        if not Groupbox.Destroyed then Groupbox:Resize() end
+                    end)
+                end)
+            )
+
             -- Keep the layered inner container synced with its controls.
             -- UIListLayout.AbsoluteContentSize can update one frame after an element
             -- is inserted; without this signal the outer groupbox may keep its old
@@ -15782,12 +15840,8 @@ function Library:CreateWindow(WindowInfo)
             function Groupbox:SetDescription(Description: string | nil)
                 GroupboxDescription.Text = Description or ""
                 GroupboxDescription.Visible = (Description ~= nil)
-                local HasDescription = Description ~= nil
-                GroupboxTop.AutomaticSize = HasDescription
-                    and Enum.AutomaticSize.Y or Enum.AutomaticSize.None
-                GroupboxTop.Size = HasDescription
-                    and UDim2.fromScale(1, 0)
-                    or UDim2.new(1, 0, 0, Library.IsMobile and 34 or 36)
+                GroupboxTop.AutomaticSize = Enum.AutomaticSize.Y
+                GroupboxTop.Size = UDim2.new(1, 0, 0, Library.IsMobile and 34 or 36)
                 Groupbox:Resize()
             end
 
