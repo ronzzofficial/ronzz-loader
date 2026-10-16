@@ -1,4 +1,5 @@
 -- ZANJI V11.31: responsive key UI text, groupbox headers, and footer without bullet.
+-- ZANJIHUB Obsidian V11.33: centered status cards and grouped icon/title headers.
 local cloneref = (cloneref or clonereference or function(instance: any)
 -- ZANJI V11.32: per-window compact footer font sizing for the ZANJIHUB login.
 -- ZANJI V11.30: global Fuse-style stable dropdown row recycling; no visible-row rebinding flicker.
@@ -5123,12 +5124,15 @@ do
 
             Data.Text = Params.Text or ""
             Data.DoesWrap = Params.DoesWrap or false
+            -- Opt-in vertical centering for status cards (e.g. access verification).
+            Data.CenterVertically = Params.CenterVertically == true
             Data.Size = Params.Size or (Library.IsMobile and 12 or 13)
             Data.Visible = Params.Visible ~= false
             Data.Idx = typeof(Second) == "table" and First or nil
         else
             Data.Text = First or ""
             Data.DoesWrap = Second or false
+            Data.CenterVertically = false
             Data.Size = Library.IsMobile and 12 or 13
             Data.Visible = true
             Data.Idx = select(3, ...) or nil
@@ -5163,6 +5167,7 @@ do
 
             Text = Data.Text,
             DoesWrap = Data.DoesWrap,
+            CenterVertically = Data.CenterVertically == true,
             IsDivider = tostring(Data.Text or ""):match("^%s*[─━%-%_]+%s*$") ~= nil,
 
             Addons = Addons,
@@ -5183,7 +5188,8 @@ do
             TextWrapped = Label.DoesWrap,
             TextTruncate = Label.DoesWrap and Enum.TextTruncate.None or Enum.TextTruncate.AtEnd,
             TextXAlignment = Groupbox.IsKeyTab and Enum.TextXAlignment.Center or Enum.TextXAlignment.Left,
-            TextYAlignment = Label.DoesWrap and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center,
+            TextYAlignment = (Label.CenterVertically or not Label.DoesWrap)
+                and Enum.TextYAlignment.Center or Enum.TextYAlignment.Top,
             Parent = Container,
         })
         New("UICorner", {
@@ -5208,11 +5214,12 @@ do
                 Parent = TextLabel,
             })
         end
+        local LabelVerticalPadding = Label.CenterVertically and 7 or 1
         New("UIPadding", {
-            PaddingBottom = UDim.new(0, 1),
+            PaddingBottom = UDim.new(0, LabelVerticalPadding),
             PaddingLeft = UDim.new(0, Library.IsMobile and 8 or 10),
             PaddingRight = UDim.new(0, Library.IsMobile and 8 or 10),
-            PaddingTop = UDim.new(0, 1),
+            PaddingTop = UDim.new(0, LabelVerticalPadding),
             Parent = TextLabel,
         })
 
@@ -5225,7 +5232,8 @@ do
             local WrapNow = Label.DoesWrap
             TextLabel.TextWrapped = WrapNow
             TextLabel.TextTruncate = WrapNow and Enum.TextTruncate.None or Enum.TextTruncate.AtEnd
-            TextLabel.TextYAlignment = WrapNow and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center
+            TextLabel.TextYAlignment = (Label.CenterVertically or not WrapNow)
+                and Enum.TextYAlignment.Center or Enum.TextYAlignment.Top
 
             if not WrapNow then
                 TextLabel.Size = UDim2.new(1, 0, 0, Library.IsMobile and 24 or 28)
@@ -5246,8 +5254,10 @@ do
             local PaddingX = Library.IsMobile and 16 or 20
             local TextWidth = math.max(8, Width / math.max(Library.DPIScale, 0.1) - PaddingX - 4)
             local _, Y = Library:GetTextBounds(Label.Text, TextLabel.FontFace, TextLabel.TextSize, TextWidth)
+            local TotalInset = Label.CenterVertically and (LabelVerticalPadding * 2 + 2)
+                or (Library.IsMobile and 10 or 12)
             TextLabel.Size = UDim2.new(1, 0, 0,
-                math.max(Library.IsMobile and 26 or 28, math.ceil(Y) + (Library.IsMobile and 10 or 12)))
+                math.max(Library.IsMobile and 26 or 28, math.ceil(Y) + TotalInset))
         end
 
         function Label:SetVisible(Visible: boolean)
@@ -15599,36 +15609,57 @@ function Library:CreateWindow(WindowInfo)
                     Parent = GroupboxTop,
                 })
 
+                -- ZANJI V11.33: a single horizontal row keeps the icon visually
+                -- joined to the title. Both align to the same vertical center,
+                -- regardless of title wrapping or UI scale.
                 local BoxIcon = Library:GetCustomIcon(Info.IconName)
+                local HeaderIconWidth = Library.IsMobile and 16 or 18
+                local HeaderIconGap = 6
+                local ArrowReservedWidth = Info.DisableCollapsing ~= true and 26 or 0
+
+                local HeaderRow = New("Frame", {
+                    AutomaticSize = Enum.AutomaticSize.Y,
+                    BackgroundTransparency = 1,
+                    Size = UDim2.new(1, -ArrowReservedWidth, 0, 22),
+                    Parent = GroupboxTop,
+                })
+                New("UIListLayout", {
+                    FillDirection = Enum.FillDirection.Horizontal,
+                    HorizontalAlignment = Enum.HorizontalAlignment.Left,
+                    VerticalAlignment = Enum.VerticalAlignment.Center,
+                    Padding = UDim.new(0, HeaderIconGap),
+                    Parent = HeaderRow,
+                })
+
                 if BoxIcon then
                     New("ImageLabel", {
-                        AnchorPoint = Vector2.new(0, 0.5),
+                        LayoutOrder = 0,
                         Image = BoxIcon.Url,
                         ImageColor3 = "AccentColor",
                         ImageRectOffset = BoxIcon.ImageRectOffset,
                         ImageRectSize = BoxIcon.ImageRectSize,
-                        Position = UDim2.fromScale(0, 0.5),
-                        Size = UDim2.fromOffset(Library.IsMobile and 16 or 18, Library.IsMobile and 16 or 18),
-                        Parent = GroupboxTop,
+                        Size = UDim2.fromOffset(HeaderIconWidth, HeaderIconWidth),
+                        Parent = HeaderRow,
                     })
                 end
 
                 local TextsFrame = New("Frame", {
+                    LayoutOrder = 1,
                     AutomaticSize = Enum.AutomaticSize.Y,
                     BackgroundTransparency = 1,
-                    Position = UDim2.fromOffset(BoxIcon and 22 or 0, 0),
-                    -- Reserve a fixed rail on the right for the collapse arrow.
-                    Size = UDim2.new(1, -38 - (BoxIcon and 22 or 0), 0, 0),
-                    Parent = GroupboxTop,
+                    -- Reserve the actual icon width + 6px only, no extra inset.
+                    Size = UDim2.new(1,
+                        -(BoxIcon and (HeaderIconWidth + HeaderIconGap) or 0), 0, 22),
+                    Parent = HeaderRow,
                 })
                 New("UIListLayout", {
                     Parent = TextsFrame,
                 })
                 New("UIPadding", {
-                    PaddingBottom = UDim.new(0, 3),
-                    PaddingLeft = UDim.new(0, 6),
-                    PaddingRight = UDim.new(0, 6),
-                    PaddingTop = UDim.new(0, 3),
+                    PaddingBottom = UDim.new(0, 2),
+                    PaddingLeft = UDim.new(0, 0),
+                    PaddingRight = UDim.new(0, 0),
+                    PaddingTop = UDim.new(0, 2),
                     Parent = TextsFrame,
                 })
 
@@ -15642,6 +15673,7 @@ function Library:CreateWindow(WindowInfo)
                     TextWrapped = true,
                     TextTruncate = Enum.TextTruncate.None,
                     TextXAlignment = Enum.TextXAlignment.Left,
+                    TextYAlignment = Enum.TextYAlignment.Center,
                     Parent = TextsFrame,
                 })
                 New("UIPadding", {
