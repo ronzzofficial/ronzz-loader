@@ -1,5 +1,6 @@
 -- ZANJI V11.31: responsive key UI text, groupbox headers, and footer without bullet.
 local cloneref = (cloneref or clonereference or function(instance: any)
+-- ZANJI V11.32: per-window compact footer font sizing for the ZANJIHUB login.
 -- ZANJI V11.30: global Fuse-style stable dropdown row recycling; no visible-row rebinding flicker.
 -- ZANJI V11.30: smooth circular virtual-row recycling prevents dropdown scroll flicker.
 -- ZANJI V11.29: value-dropdown rows support per-option inline inputs with virtualization-safe commit.
@@ -402,6 +403,7 @@ local Templates = {
         Title = "No Title",
         Footer = "No Footer",
         FooterDiscord = "",
+        FooterTextSize = 0, -- 0 uses the original per-device size; override per-window.
 
         Position = UDim2.fromOffset(6, 6),
         Size = UDim2.fromOffset(720, 600),
@@ -14279,6 +14281,12 @@ function Library:CreateWindow(WindowInfo)
         )
 
         --// Footer \\--
+        -- Per-window footer font size. Does not change text in normal controls.
+        local FooterFontSize = tonumber(WindowInfo.FooterTextSize) or 0
+        if FooterFontSize <= 0 then
+            FooterFontSize = Library.IsMobile and 11 or 14
+        end
+        FooterFontSize = math.clamp(FooterFontSize, 8, 18)
         -- ZANJI: centered inline footer, matching Ride A Pet:
         -- underlined/clickable Discord invite • version text.
         local FooterRow = New("Frame", {
@@ -14309,7 +14317,7 @@ function Library:CreateWindow(WindowInfo)
             Text = tostring(WindowInfo.FooterDiscord or "") ~= ""
                 and ("<u>" .. tostring(WindowInfo.FooterDiscord or "") .. "</u>")
                 or "",
-            TextSize = Library.IsMobile and 11 or 14,
+            TextSize = FooterFontSize,
             TextColor3 = Color3.fromRGB(172, 158, 224),
             TextTransparency = 0.15,
             TextXAlignment = Enum.TextXAlignment.Center,
@@ -14324,7 +14332,7 @@ function Library:CreateWindow(WindowInfo)
             Size = UDim2.new(0, 0, 1, 0),
             BackgroundTransparency = 1,
             Text = tostring(WindowInfo.Footer or ""):gsub("^%s*•%s*", ""),
-            TextSize = Library.IsMobile and 11 or 14,
+            TextSize = FooterFontSize,
             TextColor3 = Color3.fromRGB(210, 210, 218),
             TextTransparency = 0.45,
             TextXAlignment = Enum.TextXAlignment.Center,
