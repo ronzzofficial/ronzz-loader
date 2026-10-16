@@ -3,6 +3,7 @@
 -- ZANJIHUB Obsidian V11.33: centered status cards and grouped icon/title headers.
 local cloneref = (cloneref or clonereference or function(instance: any)
 -- ZANJI V11.32: per-window compact footer font sizing for the ZANJIHUB login.
+-- ZANJI V11.36: responsive minimum window width prevents one-line groupbox titles from wrapping while resizing.
 -- ZANJI V11.30: global Fuse-style stable dropdown row recycling; no visible-row rebinding flicker.
 -- ZANJI V11.30: smooth circular virtual-row recycling prevents dropdown scroll flicker.
 -- ZANJI V11.29: value-dropdown rows support per-option inline inputs with virtualization-safe commit.
@@ -441,6 +442,9 @@ local Templates = {
         DisableCompactingSnap = false,
         SidebarCompacted = false,
         MinContainerWidth = 256,
+        -- Prevent main-window dragging from squeezing groupbox titles to a second line.
+        -- Computed from each groupbox title and current sidebar width.
+        PreserveSingleLineGroupboxTitles = true,
 
         --// Snapping \\--
         MinSidebarWidth = 128,
@@ -1846,7 +1850,7 @@ function Library:MakeDraggable(UI: GuiObject, DragFrame: GuiObject, IgnoreToggle
     end)
 end
 
-function Library:MakeResizable(UI: GuiObject, DragFrame: GuiObject, Callback: () -> ()?)
+function Library:MakeResizable(UI: GuiObject, DragFrame: GuiObject, Callback: () -> ()?, GetMinimumWidth: (() -> number)?)
     local StartPos
     local FrameSize
     local Dragging = false
@@ -1889,9 +1893,17 @@ function Library:MakeResizable(UI: GuiObject, DragFrame: GuiObject, Callback: ()
 
         if Dragging and IsHoverInput(Input) then
             local Delta = Input.Position - StartPos
+            -- Window-specific minimum; other draggable/resizable UIs keep their defaults.
+            local minimumWidth = Library.MinSize.X
+            if type(GetMinimumWidth) == "function" then
+                local ok, width = pcall(GetMinimumWidth)
+                if ok and type(width) == "number" and width == width then
+                    minimumWidth = math.max(minimumWidth, width)
+                end
+            end
             UI.Size = UDim2.new(
                 FrameSize.X.Scale,
-                math.clamp(FrameSize.X.Offset + Delta.X, Library.MinSize.X, math.huge),
+                math.clamp(FrameSize.X.Offset + Delta.X, minimumWidth, math.huge),
                 FrameSize.Y.Scale,
                 math.clamp(FrameSize.Y.Offset + Delta.Y, Library.MinSize.Y, math.huge)
             )
@@ -13895,6 +13907,41 @@ function Library:CreateWindow(WindowInfo)
         tonumber(WindowInfo.MinSidebarWidth) or 128
     )
 
+    -- Track the widest normal groupbox title in this window. A groupbox occupies
+    -- half of the content area (TabLeft / TabRight), so simply using a 256px
+    -- minimum window width can squeeze a 14px title into one character per row.
+    -- We preserve the library's ordinary wrap behavior for long descriptions.
+    local MinimumSingleLineGroupboxWidth = 0
+
+    local function RegisterSingleLineGroupboxTitle(name, withIcon)
+        if WindowInfo.PreserveSingleLineGroupboxTitles == false then return end
+        local title = tostring(name or "")
+        if title == "" then return end
+        local font = Library.Scheme.Font
+        local textWidth = select(1, Library:GetTextBounds(
+            title, font, Library.IsMobile and 13 or 14, 2000
+        ))
+        -- Header: 9px side insets, 22px icon rail, 38px arrow rail,
+        -- 6px text insets on both sides and a little tolerance for rendering.
+        local groupboxWidth = math.ceil(tonumber(textWidth) or 0)
+            + (withIcon and 22 or 0) + 38 + 18 + 12 + 10
+        MinimumSingleLineGroupboxWidth = math.max(MinimumSingleLineGroupboxWidth, groupboxWidth)
+    end
+
+    local function GetMinWidthForSingleLineTitles()
+        local baseWidth = Library.MinSize.X
+        if WindowInfo.PreserveSingleLineGroupboxTitles == false
+            or MinimumSingleLineGroupboxWidth <= 0 then
+            return baseWidth
+        end
+        local sidebarWidth = Tabs and Tabs.Size.X.Offset or InitialLeftWidth
+        -- Container padding (12px) + two half-width tab columns + their padding.
+        local needed = sidebarWidth + 1 + 12 + 2 * (MinimumSingleLineGroupboxWidth + 9)
+        local camera = workspace.CurrentCamera
+        local available = camera and math.max(160, camera.ViewportSize.X - 64) or MaxX
+        return math.max(baseWidth, math.min(math.ceil(needed), available))
+    end
+
     do
         Library.KeybindFrame, Library.KeybindContainer = Library:AddDraggableMenu("Keybinds")
         Library.KeybindFrame.AnchorPoint = Vector2.new(0, 0.5)
@@ -14380,7 +14427,7 @@ function Library:CreateWindow(WindowInfo)
                 for _, Tab in Library.Tabs do
                     Tab:Resize(true)
                 end
-            end)
+            end, GetMinWidthForSingleLineTitles)
         end
 
         New("ImageLabel", {
@@ -14645,7 +14692,17 @@ function Library:CreateWindow(WindowInfo)
     end
 
     function Window:SetSidebarWidth(Width)
-        Width = math.clamp(Width, 48, MainFrame.Size.X.Offset - WindowInfo.MinContainerWidth - 1)
+        local maxSidebarWidth = MainFrame.Size.X.Offset - WindowInfo.MinContainerWidth - 1
+        if WindowInfo.PreserveSingleLineGroupboxTitles ~= false
+            and MinimumSingleLineGroupboxWidth > 0 then
+            -- Sidebar dragging must not squeeze the two content columns either.
+            local readableContentWidth = 12 + 2 * (MinimumSingleLineGroupboxWidth + 9)
+            local readableMax = MainFrame.Size.X.Offset - readableContentWidth - 1
+            if readableMax >= math.max(48, WindowInfo.MinSidebarWidth) then
+                maxSidebarWidth = math.min(maxSidebarWidth, readableMax)
+            end
+        end
+        Width = math.clamp(Width, 48, math.max(48, maxSidebarWidth))
 
         DividerLine.Position = UDim2.fromOffset(Width, 0)
 
@@ -15592,6 +15649,10 @@ function Library:CreateWindow(WindowInfo)
                     Thickness = 1,
                     Parent = GroupboxHolder,
                 })
+
+                -- Record this title's required width before the user starts resizing.
+                -- Applies to every script using this Obsidian library, not just Login.
+                RegisterSingleLineGroupboxTitle(Info.Name, Library:GetCustomIcon(Info.IconName) ~= nil)
 
                 -- Match the compact 36px header rows from the reference.
                 -- Headers with descriptions still grow to fit both lines.
