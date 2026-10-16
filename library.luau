@@ -3,6 +3,7 @@
 -- ZANJIHUB Obsidian V11.33: centered status cards and grouped icon/title headers.
 local cloneref = (cloneref or clonereference or function(instance: any)
 -- ZANJI V11.32: per-window compact footer font sizing for the ZANJIHUB login.
+-- ZANJI V11.37: prevent groupbox title wrapping on first draw and adapt single-sided column width.
 -- ZANJI V11.36: responsive minimum window width prevents one-line groupbox titles from wrapping while resizing.
 -- ZANJI V11.30: global Fuse-style stable dropdown row recycling; no visible-row rebinding flicker.
 -- ZANJI V11.30: smooth circular virtual-row recycling prevents dropdown scroll flicker.
@@ -13913,6 +13914,25 @@ function Library:CreateWindow(WindowInfo)
     -- We preserve the library's ordinary wrap behavior for long descriptions.
     local MinimumSingleLineGroupboxWidth = 0
 
+    -- V11.37: keep the title width limit correct on the very first paint, not
+    -- just inside the window resize mouse handler. A 50/50 layout remains the
+    -- default; a one-sided tab may borrow unused width from the empty side.
+    local GetMinWidthForSingleLineTitles
+    local function EnsureSingleLineWindowWidth()
+        if not MainFrame or not MainFrame.Parent then return end
+        if WindowInfo.PreserveSingleLineGroupboxTitles == false then return end
+        local needed = GetMinWidthForSingleLineTitles()
+        local width = MainFrame.Size.X.Offset
+        if needed > width then
+            MainFrame.Size = UDim2.new(MainFrame.Size.X.Scale, needed,
+                MainFrame.Size.Y.Scale, MainFrame.Size.Y.Offset)
+            if WindowInfo.Center then
+                MainFrame.Position = UDim2.new(0.5, -needed / 2,
+                    MainFrame.Position.Y.Scale, MainFrame.Position.Y.Offset)
+            end
+        end
+    end
+
     local function RegisterSingleLineGroupboxTitle(name, withIcon)
         if WindowInfo.PreserveSingleLineGroupboxTitles == false then return end
         local title = tostring(name or "")
@@ -13923,20 +13943,47 @@ function Library:CreateWindow(WindowInfo)
         ))
         -- Header: 9px side insets, 22px icon rail, 38px arrow rail,
         -- 6px text insets on both sides and a little tolerance for rendering.
-        local groupboxWidth = math.ceil(tonumber(textWidth) or 0)
-            + (withIcon and 22 or 0) + 38 + 18 + 12 + 10
+        -- Text measurement can underreport Enum.Font.Code's actual rendered
+        -- width in some Roblox/executor combinations. Reserve extra space for
+        -- the icon, arrow, inset paddings and the final glyph.
+        local estimatedWidth = #title * (Library.IsMobile and 8 or 9)
+        local groupboxWidth = math.ceil(math.max(tonumber(textWidth) or 0, estimatedWidth))
+            + (withIcon and 22 or 0) + 38 + 18 + 12 + 16
         MinimumSingleLineGroupboxWidth = math.max(MinimumSingleLineGroupboxWidth, groupboxWidth)
+        return groupboxWidth
     end
 
-    local function GetMinWidthForSingleLineTitles()
+    GetMinWidthForSingleLineTitles = function()
         local baseWidth = Library.MinSize.X
         if WindowInfo.PreserveSingleLineGroupboxTitles == false
             or MinimumSingleLineGroupboxWidth <= 0 then
             return baseWidth
         end
         local sidebarWidth = Tabs and Tabs.Size.X.Offset or InitialLeftWidth
-        -- Container padding (12px) + two half-width tab columns + their padding.
-        local needed = sidebarWidth + 1 + 12 + 2 * (MinimumSingleLineGroupboxWidth + 9)
+        -- Tabs with both columns in use need half-width headers. A tab with
+        -- only one populated column can borrow empty space, so don't force an
+        -- unnecessarily wide minimum just to preserve the original split.
+        local requiredContent = 0
+        for _, tab in Library.Tabs do
+            if type(tab) == "table" and tab.SingleLineHeaderWidths then
+                local required = math.max(
+                    tab.SingleLineHeaderWidths[1] or 0,
+                    tab.SingleLineHeaderWidths[2] or 0)
+                if required > 0 then
+                    local sides = tab.SideContentCount or { 0, 0 }
+                    local bothPopulated = sides[1] > 0 and sides[2] > 0
+                    local content = if bothPopulated
+                        then 2 * (required + 12)
+                        else math.ceil((required + 14) / 0.95) + 8
+                    requiredContent = math.max(requiredContent, content)
+                end
+            end
+        end
+        -- Fallback for a window still constructing its first tab.
+        if requiredContent == 0 then
+            requiredContent = 2 * (MinimumSingleLineGroupboxWidth + 9)
+        end
+        local needed = sidebarWidth + 1 + 12 + requiredContent
         local camera = workspace.CurrentCamera
         local available = camera and math.max(160, camera.ViewportSize.X - 64) or MaxX
         return math.max(baseWidth, math.min(math.ceil(needed), available))
@@ -15134,6 +15181,9 @@ function Library:CreateWindow(WindowInfo)
             Groupboxes = {},
             Tabboxes = {},
             DependencyGroupboxes = {},
+            -- Per-side header width requirements for this tab, not globally.
+            SingleLineHeaderWidths = { 0, 0 },
+            SideContentCount = { 0, 0 },
         }
 
         function Tab:UpdateWarningBox(Info)
@@ -15210,10 +15260,28 @@ function Library:CreateWindow(WindowInfo)
 
         function Tab:RefreshSides()
             local Offset = WarningBoxHolder.Visible and WarningBox.Size.Y.Offset + (Library.IsMobile and 4 or 6) or 0
-            for _, Side in Tab.Sides do
-                Side.Position = UDim2.new(Side.Position.X.Scale, 0, 0, Offset)
-                Side.Size = UDim2.new(0.5, Library.IsMobile and -1 or -2, 1, -Offset)
+            local leftFraction, rightFraction = 0.5, 0.5
+            local widths = Tab.SingleLineHeaderWidths
+            if WindowInfo.PreserveSingleLineGroupboxTitles ~= false and widths then
+                local available = TabContainer.AbsoluteSize.X
+                if available > 0 then
+                    -- If only one side has controls, it can borrow just enough
+                    -- width from the unused column to keep its icon + title
+                    -- on a single line. It does not expand to full width.
+                    if widths[1] > 0 and Tab.SideContentCount[2] == 0 then
+                        leftFraction = math.clamp((widths[1] + 14) / available, 0.5, 0.95)
+                        rightFraction = 1 - leftFraction
+                    elseif widths[2] > 0 and Tab.SideContentCount[1] == 0 then
+                        rightFraction = math.clamp((widths[2] + 14) / available, 0.5, 0.95)
+                        leftFraction = 1 - rightFraction
+                    end
+                end
             end
+            local widthGap = Library.IsMobile and -1 or -2
+            Tab.Sides[1].Position = UDim2.new(0, 0, 0, Offset)
+            Tab.Sides[1].Size = UDim2.new(leftFraction, widthGap, 1, -Offset)
+            Tab.Sides[2].Position = UDim2.new(1, 0, 0, Offset)
+            Tab.Sides[2].Size = UDim2.new(rightFraction, widthGap, 1, -Offset)
         end
 
         function Tab:Resize(ResizeWarningBox: boolean?)
@@ -15574,6 +15642,11 @@ function Library:CreateWindow(WindowInfo)
             else
                 table.insert(Tab.Tabboxes, Tabbox)
             end
+            if ParentObj.Type ~= "Groupbox" and Tab.SideContentCount then
+                local side = (Info.Side == 1) and 1 or 2
+                Tab.SideContentCount[side] = Tab.SideContentCount[side] + 1
+                Tab:RefreshSides()
+            end
 
             return Tabbox
         end
@@ -15652,7 +15725,13 @@ function Library:CreateWindow(WindowInfo)
 
                 -- Record this title's required width before the user starts resizing.
                 -- Applies to every script using this Obsidian library, not just Login.
-                RegisterSingleLineGroupboxTitle(Info.Name, Library:GetCustomIcon(Info.IconName) ~= nil)
+                local minTitleWidth = RegisterSingleLineGroupboxTitle(
+                    Info.Name, Library:GetCustomIcon(Info.IconName) ~= nil)
+                if minTitleWidth and Tab.SingleLineHeaderWidths then
+                    local side = (Info.Side == 1) and 1 or 2
+                    Tab.SingleLineHeaderWidths[side] = math.max(
+                        Tab.SingleLineHeaderWidths[side], minTitleWidth)
+                end
 
                 -- Match the compact 36px header rows from the reference.
                 -- Headers with descriptions still grow to fit both lines.
@@ -16050,6 +16129,23 @@ function Library:CreateWindow(WindowInfo)
 
             Groupbox:Resize()
             Tab.Groupboxes[Info.Name] = Groupbox
+            if Tab.SideContentCount then
+                local side = (Info.Side == 1) and 1 or 2
+                Tab.SideContentCount[side] = Tab.SideContentCount[side] + 1
+            end
+
+            if WindowInfo.PreserveSingleLineGroupboxTitles ~= false then
+                -- Ensure the already-created window satisfies its new limit.
+                -- In older versions this only happened when manually dragged.
+                EnsureSingleLineWindowWidth()
+                Tab:RefreshSides()
+                task.defer(function()
+                    if not Groupbox.Destroyed and MainFrame and MainFrame.Parent then
+                        EnsureSingleLineWindowWidth()
+                        Tab:RefreshSides()
+                    end
+                end)
+            end
 
             if Info.Visible == false then
                 Groupbox:Hide()
