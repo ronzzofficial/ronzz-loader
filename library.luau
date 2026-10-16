@@ -1,3 +1,4 @@
+-- ZANJI V11.38: All AddLabel status cards center vertically by default.
 -- ZANJI V11.35: restored original unmodified groupbox header/layout from original user library.
 -- ZANJI V11.31: responsive key UI text, groupbox headers, and footer without bullet.
 -- ZANJIHUB Obsidian V11.33: centered status cards and grouped icon/title headers.
@@ -5138,15 +5139,18 @@ do
 
             Data.Text = Params.Text or ""
             Data.DoesWrap = Params.DoesWrap or false
-            -- Opt-in vertical centering for status cards (e.g. access verification).
-            Data.CenterVertically = Params.CenterVertically == true
+            -- ZANJI V11.38: vertically center ALL labels by default, including
+            -- wrapped status cards used by Eggs, Pets, Events, and Login.
+            -- Individual labels can still opt out with CenterVertically = false.
+            Data.CenterVertically = Params.CenterVertically ~= false
             Data.Size = Params.Size or (Library.IsMobile and 12 or 13)
             Data.Visible = Params.Visible ~= false
             Data.Idx = typeof(Second) == "table" and First or nil
         else
             Data.Text = First or ""
             Data.DoesWrap = Second or false
-            Data.CenterVertically = false
+            -- Positional AddLabel(text, doesWrap) uses the same centered default.
+            Data.CenterVertically = true
             Data.Size = Library.IsMobile and 12 or 13
             Data.Visible = true
             Data.Idx = select(3, ...) or nil
@@ -5228,6 +5232,8 @@ do
                 Parent = TextLabel,
             })
         end
+        -- Symmetrical insets keep text visually centered on every status card.
+        -- The height calculation below includes this padding for wrapped text.
         local LabelVerticalPadding = Label.CenterVertically and 7 or 1
         New("UIPadding", {
             PaddingBottom = UDim.new(0, LabelVerticalPadding),
