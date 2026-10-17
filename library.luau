@@ -1,3 +1,4 @@
+-- ZANJIHUB UI LIBRARY V12.99 | writable PlayerGui host for in-tab Predictor
 -- ZANJI V11.38: All AddLabel status cards center vertically by default.
 -- ZANJI V11.35: restored original unmodified groupbox header/layout from original user library.
 -- ZANJI V11.31: responsive key UI text, groupbox headers, and footer without bullet.
@@ -1422,14 +1423,19 @@ local function SafeParentUI(Instance: Instance, Parent: Instance | () -> Instanc
     end
 end
 
+-- V12.99: Owned UI host. Potassium's permission probe showed that
+-- the hub UI created under gethui/CoreGui is protected by Plugin capability,
+-- whereas an ordinary PlayerGui TextLabel is writable by the SAME main script.
+-- Parent ALL library-owned GUIs in the local PlayerGui so future SetText / rich
+-- text card updates are accessible. This intentionally does NOT call protectgui.
 local function ParentUI(UI: Instance, SkipHiddenUI: boolean?)
-    if SkipHiddenUI then
-        SafeParentUI(UI, CoreGui)
-        return
-    end
-
-    pcall(protectgui, UI)
-    SafeParentUI(UI, gethui)
+    local playerGui = Library.LocalPlayer:WaitForChild("PlayerGui", 20)
+    assert(playerGui, "[ZANJIHUB UI] PlayerGui missing; cannot create accessible UI")
+    local ok,err=pcall(function()
+        UI.Parent = playerGui
+    end)
+    assert(ok and UI.Parent == playerGui,
+        "[ZANJIHUB UI] PlayerGui parenting failed: "..tostring(err))
 end
 
 local function SetAlwaysOnTop(Gui: ScreenGui, Enabled: boolean)
@@ -18478,7 +18484,8 @@ function Library:Unload()
 end
 
 getgenv().Library = Library
-Library.ZanjiBuild = "2026-09-23-inline-actions-v4-eof-clean"
-pcall(function() print("[ZANJI UI] Library build: 2026-09-23-inline-actions-v4-eof-clean") end)
+Library.ZanjiBuild = "2026-10-17-v1299-playergui-writable-embedded-predictor"
+Library.UIHost = "PlayerGui"
+pcall(function() print("[ZANJI UI] Library build: V12.99 PlayerGui writable predictor") end)
 
 return Library
