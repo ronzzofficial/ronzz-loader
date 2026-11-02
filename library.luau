@@ -1,4 +1,4 @@
--- ZANJIHUB UI LIBRARY V12.99 | writable PlayerGui host for in-tab Predictor
+-- ZANJIHUB UI LIBRARY V13.00 | dual per-row Pick-Up / Place inputs
 -- ZANJI V11.38: All AddLabel status cards center vertically by default.
 -- ZANJI V11.35: restored original unmodified groupbox header/layout from original user library.
 -- ZANJI V11.31: responsive key UI text, groupbox headers, and footer without bullet.
@@ -7451,6 +7451,11 @@ do
                         and typeof(Raw.RowInput) == "table"
                         and Raw.RowInput
                         or nil,
+                    RowInput2 =
+                        typeof(Raw) == "table"
+                        and typeof(Raw.RowInput2) == "table"
+                        and Raw.RowInput2
+                        or nil,
                 }
 
                 table.insert(NormalizedOptions, Option)
@@ -8053,23 +8058,11 @@ local List = New("ScrollingFrame", {
             return Value
         end
 
-        local function GetRowInputInfo(Value)
-            if not UseValueOptions then
-                return nil
-            end
-
-            local Option =
-                Dropdown.OptionByValue
-                and Dropdown.OptionByValue[Value]
-
-            local RowInput =
-                Option
-                and Option.RowInput
-                or nil
-
-            return typeof(RowInput) == "table"
-                and RowInput
-                or nil
+        local function GetRowInputInfo(Value, Slot)
+            if not UseValueOptions then return nil end
+            local Option = Dropdown.OptionByValue and Dropdown.OptionByValue[Value]
+            local RowInput = Option and (Slot == 2 and Option.RowInput2 or Option.RowInput) or nil
+            return typeof(RowInput) == "table" and RowInput or nil
         end
 
         local function EscapeRowInputRichText(Value)
@@ -8776,8 +8769,99 @@ local List = New("ScrollingFrame", {
             Entry.RowInputStroke = InputStroke
         end
 
+
+        -- ZANJIHUB dual value row, opt-in with RowInput2. Each textbox keeps its
+        -- own focus/commit state even when virtual rows are rebound on scroll.
+        local function EnsureRowInput2Controls(Entry)
+            if Entry.RowInput2Root and Entry.RowInput2Root.Parent then return end
+            local Button = Entry.Button
+            local Label = New("TextLabel", {
+                BackgroundTransparency = 1, Position = UDim2.fromScale(0.68, 0),
+                Size = UDim2.new(0.12, 0, 1, 0), RichText = true,
+                Text = "Place:", TextColor3 = LayeredStyle.SecondaryText,
+                TextSize = CurrentOptionTextSize, TextTruncate = Enum.TextTruncate.AtEnd,
+                TextWrapped = false, TextXAlignment = Enum.TextXAlignment.Left,
+                TextYAlignment = Enum.TextYAlignment.Center, Visible = false,
+                ZIndex = 124, Parent = Button,
+            })
+            local Clip = New("Frame", {
+                BackgroundColor3 = LayeredStyle.InputBox,
+                Position = UDim2.new(0.83, 0, 0.5, -14),
+                Size = UDim2.new(0.17, -2, 0, 28),
+                ClipsDescendants = true, Visible = false, ZIndex = 124, Parent = Button,
+            })
+            New("UICorner", {CornerRadius = UDim.new(0, math.max(1, Library.CornerRadius)), Parent = Clip})
+            local Stroke = New("UIStroke", {
+                ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+                Color = LayeredStyle.Border, Thickness = 1,
+                Transparency = 0.06, Parent = Clip,
+            })
+            local Input = New("TextBox", {
+                BackgroundTransparency = 1, ClearTextOnFocus = false,
+                MultiLine = false, PlaceholderColor3 = LayeredStyle.MutedText,
+                PlaceholderText = "0", Position = UDim2.fromOffset(5, 0),
+                Size = UDim2.new(1, -10, 1, 0), Text = "",
+                TextColor3 = LayeredStyle.MainText, TextSize = CurrentOptionTextSize,
+                TextTruncate = Enum.TextTruncate.AtEnd, TextWrapped = false,
+                TextXAlignment = Enum.TextXAlignment.Center,
+                TextYAlignment = Enum.TextYAlignment.Center,
+                ZIndex = 125, Parent = Clip,
+            })
+            Input.Focused:Connect(function()
+                Entry.Row2EditingValue = Entry.Value
+                Entry.Row2Committed = Input.Text
+                Clip.BackgroundColor3 = LayeredStyle.InputHover
+                Stroke.Color = Library.Scheme.AccentColor
+            end)
+            Input.FocusLost:Connect(function(EnterPressed)
+                local EditingValue = Entry.Row2EditingValue or Entry.Value
+                local RowInfo = GetRowInputInfo(EditingValue, 2)
+                if RowInfo then
+                    local Fallback = Entry.Row2Committed or ResolveRowInputValue(RowInfo, EditingValue)
+                    local NewValue = NormalizeRowInputValue(RowInfo, Input.Text, Fallback)
+                    local Result = Library:SafeCallback(RowInfo.Callback, NewValue,
+                        EditingValue, Dropdown, Input, EnterPressed == true)
+                    if Result ~= nil then
+                        NewValue = NormalizeRowInputValue(RowInfo, Result, NewValue)
+                    end
+                    Input.Text = NewValue
+                    Entry.Row2Committed = NewValue
+                    Library:SafeCallback(RowInfo.Changed, NewValue,
+                        EditingValue, Dropdown, Input, EnterPressed == true)
+                end
+                Entry.Row2EditingValue = nil
+                Clip.BackgroundColor3 = LayeredStyle.InputBox
+                Stroke.Color = LayeredStyle.Border
+                if UpdateEntry and Entry.Value then UpdateEntry(Entry) end
+            end)
+            Entry.RowInput2Root = Clip
+            Entry.RowInput2Name = Label
+            Entry.RowInput2Box = Input
+        end
+
         LayoutRowInputControls = function(Entry)
             if not Entry.RowInputRoot then return end
+            if GetRowInputInfo(Entry.Value, 2) then
+                local height = math.clamp(CurrentRowHeight - 12, 22, 30)
+                Entry.RowInputName.Position = UDim2.fromOffset(0, 0)
+                Entry.RowInputName.Size = UDim2.new(0.36, -8, 1, 0)
+                Entry.RowInputSaved.Position = UDim2.new(0.36, 0, 0, 0)
+                Entry.RowInputSaved.Size = UDim2.new(0.13, -2, 1, 0)
+                Entry.RowInputRoot.Position = UDim2.new(0.50, 0, 0.5, -math.floor(height / 2))
+                Entry.RowInputRoot.Size = UDim2.new(0.14, -2, 0, height)
+                Entry.RowInputName.TextSize = CurrentOptionTextSize
+                Entry.RowInputSaved.TextSize = math.max(10, CurrentOptionTextSize - 1)
+                Entry.RowInputBox.TextSize = CurrentOptionTextSize
+                if Entry.RowInput2Root then
+                    Entry.RowInput2Name.Position = UDim2.new(0.66, 0, 0, 0)
+                    Entry.RowInput2Name.Size = UDim2.new(0.15, -2, 1, 0)
+                    Entry.RowInput2Root.Position = UDim2.new(0.82, 0, 0.5, -math.floor(height / 2))
+                    Entry.RowInput2Root.Size = UDim2.new(0.18, -2, 0, height)
+                    Entry.RowInput2Name.TextSize = math.max(10, CurrentOptionTextSize - 1)
+                    Entry.RowInput2Box.TextSize = CurrentOptionTextSize
+                end
+                return
+            end
 
             local NameRatio = Library.IsMobile and 0.31 or 0.36
             local SavedRatio = Library.IsMobile and 0.41 or 0.39
@@ -8833,12 +8917,20 @@ local List = New("ScrollingFrame", {
             Entry.Button.TextColor3 = LayeredStyle.MainText
             Entry.Button.TextTransparency = Entry.Disabled and 0.65 or 0
 
+            local DynamicVisible = RowInfo and RowInfo.VisibleWhen
+            if type(DynamicVisible) == "function" then
+                local ok, visible = pcall(DynamicVisible, Entry.Value, Dropdown)
+                DynamicVisible = ok and visible == true
+            end
             local ShowRowInput =
                 RowInfo
                 and (RowInfo.VisibleWhenSelected ~= true or selected)
+                and DynamicVisible ~= false
 
             if ShowRowInput then
                 EnsureRowInputControls(Entry)
+                local RowInfo2 = GetRowInputInfo(Entry.Value, 2)
+                if RowInfo2 then EnsureRowInput2Controls(Entry) end
                 LayoutRowInputControls(Entry)
 
                 Entry.Button.Text = ""
@@ -8875,10 +8967,32 @@ local List = New("ScrollingFrame", {
                 Entry.RowInputSaved.Text =
                     EscapeRowInputRichText(LabelText)
                     .. (LabelText:sub(-1) == ":" and "" or ":")
-                    .. SavedText
+                    .. (RowInfo2 and "" or SavedText)
 
                 Entry.RowInputBox.PlaceholderText =
                     tostring(RowInfo.Placeholder or currentValue or "")
+                if RowInfo2 and Entry.RowInput2Root then
+                    local secondValue = ResolveRowInputValue(RowInfo2, Entry.Value)
+                    Entry.Row2Committed = secondValue
+                    if UserInputService:GetFocusedTextBox() ~= Entry.RowInput2Box then
+                        Entry.RowInput2Box.Text = secondValue
+                    end
+                    local secondLabel = tostring((Library.IsMobile and RowInfo2.MobileText)
+                        or RowInfo2.Text or "Place")
+                    Entry.RowInput2Name.Text = EscapeRowInputRichText(secondLabel)
+                        .. (secondLabel:sub(-1) == ":" and "" or ":")
+                    Entry.RowInput2Box.PlaceholderText =
+                        tostring(RowInfo2.Placeholder or secondValue or "")
+                    local disabled2 = Entry.Disabled or Dropdown.Disabled or RowInfo2.Disabled == true
+                    Entry.RowInput2Box.TextEditable = not disabled2
+                    Entry.RowInput2Box.Active = not disabled2
+                    Entry.RowInput2Box.TextTransparency = disabled2 and 0.55 or 0
+                    Entry.RowInput2Root.Visible = true
+                    Entry.RowInput2Name.Visible = true
+                elseif Entry.RowInput2Root then
+                    Entry.RowInput2Root.Visible = false
+                    Entry.RowInput2Name.Visible = false
+                end
 
                 local RowDisabled =
                     Entry.Disabled
@@ -8896,6 +9010,10 @@ local List = New("ScrollingFrame", {
                     Entry.RowInputName.Visible = false
                     Entry.RowInputSaved.Visible = false
                     Entry.RowInputRoot.Visible = false
+                end
+                if Entry.RowInput2Root then
+                    Entry.RowInput2Root.Visible = false
+                    Entry.RowInput2Name.Visible = false
                 end
                 UpdateTextTruncateForActualWidth(Entry.Button, 0)
             end
@@ -18484,8 +18602,8 @@ function Library:Unload()
 end
 
 getgenv().Library = Library
-Library.ZanjiBuild = "2026-10-17-v1299-playergui-writable-embedded-predictor"
+Library.ZanjiBuild = "2026-11-02-v13-dual-quickcast-row"
 Library.UIHost = "PlayerGui"
-pcall(function() print("[ZANJI UI] Library build: V12.99 PlayerGui writable predictor") end)
+pcall(function() print("[ZANJI UI] Library build: V13.00 Dual Quick Cast row") end)
 
 return Library
