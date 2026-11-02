@@ -8843,26 +8843,34 @@ local List = New("ScrollingFrame", {
             if not Entry.RowInputRoot then return end
             if GetRowInputInfo(Entry.Value, 2) then
                 local height = math.clamp(CurrentRowHeight - 12, 22, 30)
+                -- Compact aligned pair: Name | Pick-Up: [0.6] Place: [0]
+                -- Equal input widths / vertical centers on PC and mobile.
                 Entry.RowInputName.Position = UDim2.fromOffset(0, 0)
-                Entry.RowInputName.Size = UDim2.new(0.36, -8, 1, 0)
-                Entry.RowInputSaved.Position = UDim2.new(0.36, 0, 0, 0)
-                Entry.RowInputSaved.Size = UDim2.new(0.13, -2, 1, 0)
-                Entry.RowInputRoot.Position = UDim2.new(0.50, 0, 0.5, -math.floor(height / 2))
-                Entry.RowInputRoot.Size = UDim2.new(0.14, -2, 0, height)
+                Entry.RowInputName.Size = UDim2.new(0.465, -3, 1, 0)
+                Entry.RowInputName.TextTruncate = Enum.TextTruncate.AtEnd
+                Entry.RowInputSaved.Position = UDim2.new(0.475, 0, 0, 0)
+                Entry.RowInputSaved.Size = UDim2.new(0.110, -1, 1, 0)
+                Entry.RowInputRoot.Position = UDim2.new(0.585, 0, 0.5, -math.floor(height / 2))
+                Entry.RowInputRoot.Size = UDim2.new(0.135, -1, 0, height)
                 Entry.RowInputName.TextSize = CurrentOptionTextSize
                 Entry.RowInputSaved.TextSize = math.max(10, CurrentOptionTextSize - 1)
                 Entry.RowInputBox.TextSize = CurrentOptionTextSize
+                Entry.RowInputBox.TextXAlignment = Enum.TextXAlignment.Center
+                Entry.RowInputBox.TextYAlignment = Enum.TextYAlignment.Center
                 if Entry.RowInput2Root then
-                    Entry.RowInput2Name.Position = UDim2.new(0.66, 0, 0, 0)
-                    Entry.RowInput2Name.Size = UDim2.new(0.15, -2, 1, 0)
-                    Entry.RowInput2Root.Position = UDim2.new(0.82, 0, 0.5, -math.floor(height / 2))
-                    Entry.RowInput2Root.Size = UDim2.new(0.18, -2, 0, height)
+                    Entry.RowInput2Name.Position = UDim2.new(0.730, 0, 0, 0)
+                    Entry.RowInput2Name.Size = UDim2.new(0.090, -1, 1, 0)
+                    Entry.RowInput2Root.Position = UDim2.new(0.820, 0, 0.5, -math.floor(height / 2))
+                    Entry.RowInput2Root.Size = UDim2.new(0.135, -1, 0, height)
                     Entry.RowInput2Name.TextSize = math.max(10, CurrentOptionTextSize - 1)
                     Entry.RowInput2Box.TextSize = CurrentOptionTextSize
+                    Entry.RowInput2Box.TextXAlignment = Enum.TextXAlignment.Center
+                    Entry.RowInput2Box.TextYAlignment = Enum.TextYAlignment.Center
                 end
                 return
             end
 
+            Entry.RowInputBox.TextXAlignment = Enum.TextXAlignment.Left
             local NameRatio = Library.IsMobile and 0.31 or 0.36
             local SavedRatio = Library.IsMobile and 0.41 or 0.39
             local InputStart = NameRatio + SavedRatio
