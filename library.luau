@@ -1,3 +1,4 @@
+-- ZANJI v17.1: uniform 10px desktop / 8px mobile card gaps; remove empty column spacers.
 -- ZANJIHUB UI LIBRARY V13.00 | dual per-row Pick-Up / Place inputs
 -- ZANJI V11.38: All AddLabel status cards center vertically by default.
 -- ZANJI V11.35: restored original unmodified groupbox header/layout from original user library.
@@ -15149,7 +15150,8 @@ function Library:CreateWindow(WindowInfo)
                 Parent = TabContainer,
             })
             New("UIListLayout", {
-                Padding = UDim.new(0, Library.IsMobile and 4 or 6),
+                -- Exactly one gap between visible cards; wrapper padding is zero.
+                Padding = UDim.new(0, Library.IsMobile and 8 or 10),
                 Parent = TabLeft,
             })
             New("UIPadding", {
@@ -15159,18 +15161,7 @@ function Library:CreateWindow(WindowInfo)
                 PaddingTop = UDim.new(0, Library.IsMobile and 3 or 4),
                 Parent = TabLeft,
             })
-            do
-                New("Frame", {
-                    BackgroundTransparency = 1,
-                    LayoutOrder = -1,
-                    Parent = TabLeft,
-                })
-                New("Frame", {
-                    BackgroundTransparency = 1,
-                    LayoutOrder = 1,
-                    Parent = TabLeft,
-                })
-            end
+            -- No invisible spacer frames: they interfere with actual card gaps.
 
             TabRight = New("ScrollingFrame", {
                 AnchorPoint = Vector2.new(1, 0),
@@ -15184,7 +15175,8 @@ function Library:CreateWindow(WindowInfo)
                 Parent = TabContainer,
             })
             New("UIListLayout", {
-                Padding = UDim.new(0, Library.IsMobile and 4 or 6),
+                -- Exactly one gap between visible cards; wrapper padding is zero.
+                Padding = UDim.new(0, Library.IsMobile and 8 or 10),
                 Parent = TabRight,
             })
             New("UIPadding", {
@@ -15194,18 +15186,7 @@ function Library:CreateWindow(WindowInfo)
                 PaddingTop = UDim.new(0, Library.IsMobile and 3 or 4),
                 Parent = TabRight,
             })
-            do
-                New("Frame", {
-                    BackgroundTransparency = 1,
-                    LayoutOrder = -1,
-                    Parent = TabRight,
-                })
-                New("Frame", {
-                    BackgroundTransparency = 1,
-                    LayoutOrder = 1,
-                    Parent = TabRight,
-                })
-            end
+            -- No invisible spacer frames: they interfere with actual card gaps.
         end
 
         --// Warning Box \\--
@@ -15466,12 +15447,13 @@ function Library:CreateWindow(WindowInfo)
                 Parent = if ParentObj.Type == "Groupbox" then ParentObj.Container else (Info.Side == 1 and TabLeft or TabRight),
             })
             New("UIListLayout", {
-                Padding = UDim.new(0, Library.IsMobile and 3 or 5),
+                Padding = UDim.new(0, 0),
                 Parent = BoxHolder,
             })
+            -- The parent side column supplies all vertical spacing.
             New("UIPadding", {
-                PaddingBottom = UDim.new(0, Library.IsMobile and 2 or 3),
-                PaddingTop = UDim.new(0, Library.IsMobile and 2 or 3),
+                PaddingBottom = UDim.new(0, 0),
+                PaddingTop = UDim.new(0, 0),
                 Parent = BoxHolder,
             })
 
@@ -15816,12 +15798,13 @@ function Library:CreateWindow(WindowInfo)
                 Parent = (Info.Side == 1) and TabLeft or TabRight,
             })
             New("UIListLayout", {
-                Padding = UDim.new(0, Library.IsMobile and 3 or 5),
+                Padding = UDim.new(0, 0),
                 Parent = BoxHolder,
             })
+            -- The parent side column supplies all vertical spacing.
             New("UIPadding", {
-                PaddingBottom = UDim.new(0, Library.IsMobile and 2 or 3),
-                PaddingTop = UDim.new(0, Library.IsMobile and 2 or 3),
+                PaddingBottom = UDim.new(0, 0),
+                PaddingTop = UDim.new(0, 0),
                 Parent = BoxHolder,
             })
 
