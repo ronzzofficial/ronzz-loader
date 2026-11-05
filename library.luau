@@ -1351,6 +1351,74 @@ function Library:Validate(Table: { [string]: any }, Template: { [string]: any })
     return Table
 end
 
+-- Garden-only rich dropdown styling. Keep actual option values as plain IDs.
+local ZanjiGardenRainbowLabels = setmetatable({}, {__mode = "k"})
+local ZanjiGardenRainbowRunning = false
+local function ZanjiGardenEscape(value)
+    local s = tostring(value or "")
+    return s:gsub("&", "&amp;"):gsub("<", "&lt;")
+        :gsub(">", "&gt;"):gsub('"', "&quot;")
+end
+local function ZanjiGardenRainbowRichText()
+    local raw = "Rainbow"
+    local out = {}
+    local phase = os.clock() * 0.19
+    for i = 1, #raw do
+        local c = Color3.fromHSV((phase + (i - 1) / #raw) % 1, 0.86, 1)
+        local color = string.format("#%02X%02X%02X",
+            math.floor(c.R * 255 + 0.5),
+            math.floor(c.G * 255 + 0.5),
+            math.floor(c.B * 255 + 0.5))
+        out[#out + 1] = '<font color="' .. color .. '">'
+            .. raw:sub(i, i) .. '</font>'
+    end
+    return table.concat(out)
+end
+local function ZanjiGardenDropdownRichText(value, semanticKind, formatted)
+    local name = tostring(value or "")
+    local display = tostring(formatted == nil and value or formatted)
+    local plainName, quantity = display:match("^(.-)%s+%-%s+x(%d+)$")
+    if plainName and quantity then
+        local amount = tonumber(quantity) or 0
+        local color = amount > 0 and "#43E17D" or "#FF646C"
+        -- The delimiter and item count are intentionally NOT bold.
+        return "<b>" .. ZanjiGardenEscape(plainName) .. "</b> - "
+            .. '<font color="' .. color .. '">x' .. quantity .. '</font>'
+    end
+    local kind = tostring(semanticKind or "")
+    if name == "Rainbow" and (kind == "Variant" or kind == "FruitMutation"
+        or kind == "PetMutation" or kind == "Auto") then
+        return "<b>" .. ZanjiGardenRainbowRichText() .. "</b>"
+    end
+    local colored = nil
+    if kind ~= "" and type(ZanjiFormatDropdownOption) == "function" then
+        local ok, output = pcall(ZanjiFormatDropdownOption, "", name, kind)
+        if ok and type(output) == "string" then colored = output end
+    end
+    return "<b>" .. (colored or ZanjiGardenEscape(display)) .. "</b>"
+end
+local function ZanjiGardenBindRainbow(element, getValue)
+    if not element or type(getValue) ~= "function" then return end
+    ZanjiGardenRainbowLabels[element] = getValue
+    if ZanjiGardenRainbowRunning then return end
+    ZanjiGardenRainbowRunning = true
+    task.spawn(function()
+        -- One shared low-frequency timer; never create a loop per dropdown row.
+        while not Library.Unloaded do
+            task.wait(0.24)
+            for target, makeText in pairs(ZanjiGardenRainbowLabels) do
+                if not target.Parent then
+                    ZanjiGardenRainbowLabels[target] = nil
+                elseif target.Visible then
+                    local ok, rich = pcall(makeText)
+                    if ok and rich and target.Text ~= rich then target.Text = rich end
+                end
+            end
+        end
+        ZanjiGardenRainbowRunning = false
+    end)
+end
+
 --// Creator Functions \\--
 local function FillInstance(Table: { [string]: any }, Instance: GuiObject)
     local ThemeProperties = Library.Registry[Instance] or {}
@@ -6681,8 +6749,12 @@ do
 
             local Base = tostring(Input.BaseText or "Input"):gsub("%s*:%s*$", "")
             local Saved = SavedValueText(Input.Value)
+            local indicatorColor = "#43E17D"
+            if Info.ZanjiGardenStyle == true and tonumber(Saved) == 0 then
+                indicatorColor = "#FF646C"
+            end
             Label.Text = EscapeInputRichText(Base)
-                .. ': <font color="#43E17D">'
+                .. ': <font color="' .. indicatorColor .. '">'
                 .. EscapeInputRichText(Saved)
                 .. "</font>"
         end
@@ -9203,6 +9275,11 @@ local List = New("ScrollingFrame", {
         end
 
         local function BuildOrderedValues(Query: string, PrioritizeSelected: boolean)
+            -- Garden seed/watering lists stay alphabetical even when entries
+            -- are checked. Other dropdowns retain their selected-first order.
+            if Info.ZanjiKeepAlphabetical == true then
+                PrioritizeSelected = false
+            end
             local Selected = {}
             local Unselected = {}
 
@@ -9226,6 +9303,11 @@ local List = New("ScrollingFrame", {
                 end
             end
 
+            if Info.ZanjiKeepAlphabetical == true then
+                table.sort(Unselected, function(a, b)
+                    return tostring(a):lower() < tostring(b):lower()
+                end)
+            end
             if not PrioritizeSelected then
                 return Unselected
             end
@@ -10129,29 +10211,27 @@ local List = New("ScrollingFrame", {
         }
 
         local function FormatZanjiDropdownValue(Value)
+            if Info.ZanjiGardenStyle == true then
+                local formatted = nil
+                if type(Info.FormatDisplayValue) == "function" then
+                    local ok, result = pcall(Info.FormatDisplayValue, Value)
+                    if ok and result ~= nil then formatted = result end
+                end
+                return ZanjiGardenDropdownRichText(Value, Info.ZanjiColorKind, formatted)
+            end
             if type(Info.FormatDisplayValue) == "function" then
                 local ok, formatted = pcall(Info.FormatDisplayValue, Value)
-                if ok and formatted ~= nil then
-                    return tostring(formatted)
-                end
+                if ok and formatted ~= nil then return tostring(formatted) end
             end
-
             if type(ZanjiFormatDropdownOption) == "function" then
                 local ok, formatted = pcall(
-                    ZanjiFormatDropdownOption,
-                    Dropdown.Text,
-                    Value,
-                    Info.ZanjiColorKind,
-                    Info.ZanjiSemanticDetails
-                )
-                if ok and formatted ~= nil then
-                    return tostring(formatted)
-                end
+                    ZanjiFormatDropdownOption, Dropdown.Text, Value,
+                    Info.ZanjiColorKind, Info.ZanjiSemanticDetails)
+                if ok and formatted ~= nil then return tostring(formatted) end
             end
-
             return tostring(Value)
         end
-    
+
         local CompactMobileDropdown = Library.IsMobile == true
         -- V11.5: label and field use explicit top positions instead of bottom anchoring.
         -- This keeps the title-to-dropdown gap identical on PC and mobile at any UI scale.
@@ -11587,6 +11667,17 @@ local List = New("ScrollingFrame", {
             Entry.Button.TextColor3 = LayeredStyle.MainText
             Entry.Button.TextTransparency = Entry.Disabled and 0.65 or 0
             Entry.Button.Text = FormatZanjiDropdownValue(Entry.Value)
+            -- Virtualized rows are recycled: release the old Rainbow binding
+            -- before reusing a row for a different option.
+            ZanjiGardenRainbowLabels[Entry.Button] = nil
+            if Info.ZanjiGardenStyle == true
+                and tostring(Entry.Value) == "Rainbow"
+                and (Info.ZanjiColorKind == "Variant"
+                    or Info.ZanjiColorKind == "FruitMutation") then
+                ZanjiGardenBindRainbow(Entry.Button, function()
+                    return FormatZanjiDropdownValue(Entry.Value)
+                end)
+            end
             UpdateTextTruncateForActualWidth(Entry.Button, 0)
 
             if rowStroke then
@@ -11631,6 +11722,11 @@ local List = New("ScrollingFrame", {
         end
     
         local function BuildOrderedValues(Query: string, PrioritizeSelected: boolean)
+            -- Garden seed/watering lists stay alphabetical even when entries
+            -- are checked. Other dropdowns retain their selected-first order.
+            if Info.ZanjiKeepAlphabetical == true then
+                PrioritizeSelected = false
+            end
             local Selected = {}
             local Unselected = {}
     
@@ -11646,6 +11742,11 @@ local List = New("ScrollingFrame", {
                 end
             end
     
+            if Info.ZanjiKeepAlphabetical == true then
+                table.sort(Unselected, function(a, b)
+                    return tostring(a):lower() < tostring(b):lower()
+                end)
+            end
             if not PrioritizeSelected then
                 return Unselected
             end
@@ -12036,7 +12137,32 @@ local List = New("ScrollingFrame", {
                 Str = ""
             end
 
+            if Info.ZanjiGardenStyle == true then
+                if Str == "All" then
+                    Str = "<b>All</b>"
+                elseif tostring(Str):match("^%d+ selected$") then
+                    Str = "<b>" .. tostring(Str) .. "</b>"
+                end
+            end
             Display.Text = (Str == "" and "---" or Str)
+            if Info.ZanjiGardenStyle == true
+                and (Info.ZanjiColorKind == "Variant"
+                    or Info.ZanjiColorKind == "FruitMutation") then
+                local selectedRainbow = (Info.Multi == true and Dropdown.Value["Rainbow"] == true
+                    and (function()
+                        local n = 0
+                        for _ in pairs(Dropdown.Value) do n += 1 end
+                        return n == 1
+                    end)())
+                    or (Info.Multi ~= true and Dropdown.Value == "Rainbow")
+                if selectedRainbow then
+                    ZanjiGardenBindRainbow(Display, function()
+                        return FormatZanjiDropdownValue("Rainbow")
+                    end)
+                else
+                    ZanjiGardenRainbowLabels[Display] = nil
+                end
+            end
             UpdateTextTruncateForActualWidth(Display, 0, true)
         end
     
