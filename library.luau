@@ -1486,6 +1486,37 @@ local function ZanjiGardenSortItemValues(values, info)
     return true
 end
 
+-- Consistent Garden-only mutation/variant ranking. The callback comes from
+-- live ReplicatedStorage mutation metadata; enum IDs are never multiplied.
+-- Normal is always first, recognized numeric multipliers descend, unknowns
+-- alphabetical below known entries. This applies to both dropdown renderers.
+local function ZanjiGardenUsesMultiplierSort(info)
+    return info.ZanjiGardenStyle == true
+        and (info.ZanjiColorKind == "Variant"
+            or info.ZanjiColorKind == "FruitMutation")
+end
+local function ZanjiGardenSortMultiplierValues(values, info)
+    if not ZanjiGardenUsesMultiplierSort(info) then return false end
+    local convert = Library.ZanjiGardenMultiplierFormatter
+    local amounts = {}
+    for _, value in ipairs(values) do
+        if type(convert) == "function" then
+            local ok, result = pcall(convert, info.ZanjiColorKind, value)
+            if ok then amounts[value] = tonumber(result) end
+        end
+    end
+    table.sort(values, function(a, b)
+        local an, bn = tostring(a):lower(), tostring(b):lower()
+        if an == "normal" then return true end
+        if bn == "normal" then return false end
+        local av, bv = amounts[a], amounts[b]
+        if av ~= nil and bv ~= nil and av ~= bv then return av > bv end
+        if (av ~= nil) ~= (bv ~= nil) then return av ~= nil end
+        return an < bn
+    end)
+    return true
+end
+
 local function ZanjiGardenBindRainbow(element, getValue)
     if not element or type(getValue) ~= "function" then return end
     ZanjiGardenRainbowLabels[element] = getValue
@@ -9371,7 +9402,8 @@ local List = New("ScrollingFrame", {
             -- Garden seed/watering lists stay alphabetical even when entries
             -- are checked. Other dropdowns retain their selected-first order.
             if Info.ZanjiKeepAlphabetical == true
-                or ZanjiGardenUsesItemSort(Info) then
+                or ZanjiGardenUsesItemSort(Info)
+                or ZanjiGardenUsesMultiplierSort(Info) then
                 PrioritizeSelected = false
             end
             local Selected = {}
@@ -9397,7 +9429,8 @@ local List = New("ScrollingFrame", {
                 end
             end
 
-            if not ZanjiGardenSortItemValues(Unselected, Info)
+            if not ZanjiGardenSortMultiplierValues(Unselected, Info)
+                and not ZanjiGardenSortItemValues(Unselected, Info)
                 and Info.ZanjiKeepAlphabetical == true then
                 table.sort(Unselected, function(a, b)
                     return tostring(a):lower() < tostring(b):lower()
@@ -11832,7 +11865,8 @@ local List = New("ScrollingFrame", {
             -- Garden seed/watering lists stay alphabetical even when entries
             -- are checked. Other dropdowns retain their selected-first order.
             if Info.ZanjiKeepAlphabetical == true
-                or ZanjiGardenUsesItemSort(Info) then
+                or ZanjiGardenUsesItemSort(Info)
+                or ZanjiGardenUsesMultiplierSort(Info) then
                 PrioritizeSelected = false
             end
             local Selected = {}
@@ -11850,7 +11884,8 @@ local List = New("ScrollingFrame", {
                 end
             end
     
-            if not ZanjiGardenSortItemValues(Unselected, Info)
+            if not ZanjiGardenSortMultiplierValues(Unselected, Info)
+                and not ZanjiGardenSortItemValues(Unselected, Info)
                 and Info.ZanjiKeepAlphabetical == true then
                 table.sort(Unselected, function(a, b)
                     return tostring(a):lower() < tostring(b):lower()
