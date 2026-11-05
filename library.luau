@@ -6432,6 +6432,127 @@ do
         return Toggle
     end
 
+    -- ZANJI: reusable, stable two-column row for ANY pair of controls.
+    -- Example:
+    --   local dropdown, input = box:AddControlPair(
+    --       function(left) return left:AddDropdown("MyDropdown", {...}) end,
+    --       function(right) return right:AddInput("MyInput", {...}) end
+    --   )
+    -- Both controls keep their OWN holders, callbacks and state. Rebuilding
+    -- dropdown options or changing a selection cannot detach its sibling.
+    -- This works in all tabs/groupboxes, not only Garden > Planting.
+    function Funcs:AddControlPair(LeftBuilder, RightBuilder, Info)
+        assert(type(LeftBuilder) == "function", "AddControlPair: left builder must be a function")
+        assert(type(RightBuilder) == "function", "AddControlPair: right builder must be a function")
+        assert(self.Container ~= nil, "AddControlPair: requires a groupbox container")
+        if self.Destroyed then return nil, nil, nil end
+
+        Info = type(Info) == "table" and Info or {}
+        local Owner = self
+        local Gap = math.clamp(tonumber(Info.Gap) or (Library.IsMobile and 4 or 6), 0, 24)
+        local LeftRatio = math.clamp(tonumber(Info.LeftRatio) or 0.5, 0.2, 0.8)
+
+        -- The row itself is the ONE item in the outer group's UIListLayout.
+        -- Inside it, each control gets a separate stable column/container.
+        local Row = New("Frame", {
+            Name = "ZanjiControlPair",
+            BackgroundTransparency = 1,
+            BorderSizePixel = 0,
+            Size = UDim2.new(1, 0, 0, 1),
+            Visible = true,
+            Parent = Owner.Container,
+        })
+
+        local LeftCell = New("Frame", {
+            Name = "LeftControl",
+            BackgroundTransparency = 1,
+            BorderSizePixel = 0,
+            ClipsDescendants = false,
+            Position = UDim2.fromScale(0, 0),
+            Size = UDim2.new(LeftRatio, -Gap * LeftRatio, 1, 0),
+            Parent = Row,
+        })
+        local RightCell = New("Frame", {
+            Name = "RightControl",
+            BackgroundTransparency = 1,
+            BorderSizePixel = 0,
+            ClipsDescendants = false,
+            Position = UDim2.new(LeftRatio, Gap * (1 - LeftRatio), 0, 0),
+            Size = UDim2.new(1 - LeftRatio, -Gap * (1 - LeftRatio), 1, 0),
+            Parent = Row,
+        })
+
+        local LeftList = New("UIListLayout", {
+            FillDirection = Enum.FillDirection.Vertical,
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            Padding = UDim.new(0, 0),
+            Parent = LeftCell,
+        })
+        local RightList = New("UIListLayout", {
+            FillDirection = Enum.FillDirection.Vertical,
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            Padding = UDim.new(0, 0),
+            Parent = RightCell,
+        })
+
+        -- A proxy redirects only the control's parent. Its methods, elements,
+        -- change callbacks, dependency tracking and Resize still belong to
+        -- the ORIGINAL groupbox, so the paired controls behave normally.
+        local function ColumnProxy(Cell)
+            return setmetatable({ Container = Cell }, {
+                __index = function(_, Key)
+                    return Owner[Key]
+                end,
+            })
+        end
+
+        local LeftControl = LeftBuilder(ColumnProxy(LeftCell))
+        local RightControl = RightBuilder(ColumnProxy(RightCell))
+
+        local function MeasuredHeight(Cell, List)
+            local Scale = math.max(tonumber(Library.DPIScale) or 1, 0.01)
+            local Measured = List.AbsoluteContentSize.Y / Scale
+            -- Before the first layout pass, the list size can still be 0.
+            -- This fallback prevents the row from temporarily disappearing.
+            if Measured <= 0 then
+                for _, Child in ipairs(Cell:GetChildren()) do
+                    if Child:IsA("GuiObject") and Child.Visible then
+                        Measured = Measured + math.max(0, Child.Size.Y.Offset)
+                    end
+                end
+            end
+            return math.max(0, Measured)
+        end
+
+        local function SyncPairHeight()
+            if Owner.Destroyed or not Row.Parent then return end
+            local H = math.max(MeasuredHeight(LeftCell, LeftList), MeasuredHeight(RightCell, RightList))
+            local ShouldShow = H > 0
+            if Row.Visible ~= ShouldShow then
+                Row.Visible = ShouldShow
+            end
+            local Rounded = math.ceil(H)
+            if Row.Size.Y.Offset ~= Rounded then
+                Row.Size = UDim2.new(1, 0, 0, Rounded)
+                Owner:Resize()
+            end
+        end
+
+        local function DeferPairSync()
+            if not Owner.Destroyed and Row.Parent then
+                task.defer(SyncPairHeight)
+            end
+        end
+        local LeftConnection = LeftList:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(DeferPairSync)
+        local RightConnection = RightList:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(DeferPairSync)
+        if Owner.Connections then
+            table.insert(Owner.Connections, LeftConnection)
+            table.insert(Owner.Connections, RightConnection)
+        end
+        DeferPairSync()
+        return LeftControl, RightControl, Row
+    end
+
     function Funcs:AddInput(Idx, Info)
         if self.Destroyed then return nil end
 
