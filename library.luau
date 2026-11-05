@@ -13731,6 +13731,7 @@ function Library:Notify(...)
         Data.SoundId = Info.SoundId
         Data.Steps = Info.Steps
         Data.Persist = Info.Persist
+        Data.Indeterminate = Info.Indeterminate == true
 
         Data.Icon = Info.Icon
         Data.BigIcon = Info.BigIcon
@@ -13956,8 +13957,14 @@ function Library:Notify(...)
         end
     end
 
+    local IndeterminateTween
     function Data:Destroy()
+        if Data.Destroyed then return end
         Data.Destroyed = true
+        if IndeterminateTween then
+            IndeterminateTween:Cancel()
+            IndeterminateTween = nil
+        end
 
         if typeof(Data.Time) == "Instance" then
             pcall(Data.Time.Destroy, Data.Time)
@@ -13993,13 +14000,14 @@ function Library:Notify(...)
     local TimerHolder = New("Frame", {
         BackgroundTransparency = 1,
         Size = UDim2.new(1, 0, 0, 7),
-        Visible = (Data.Persist ~= true and typeof(Data.Time) ~= "Instance") or typeof(Data.Steps) == "number",
+        Visible = Data.Indeterminate == true or (Data.Persist ~= true and typeof(Data.Time) ~= "Instance") or typeof(Data.Steps) == "number",
         Parent = Holder,
     })
     local TimerBar = New("Frame", {
         BackgroundColor3 = "BackgroundColor",
         BorderColor3 = "OutlineColor",
         BorderSizePixel = 1,
+        ClipsDescendants = Data.Indeterminate == true,
         Position = UDim2.fromOffset(0, 3),
         Size = UDim2.new(1, 0, 0, 2),
         Parent = TimerHolder,
@@ -14010,7 +14018,18 @@ function Library:Notify(...)
         Parent = TimerBar,
     })
 
-    if typeof(Data.Time) == "Instance" then
+    if Data.Indeterminate then
+        -- Native Loading: animate the SAME accent bar as normal notifications.
+        -- TweenService repeats in the engine; no per-frame Lua loops.
+        TimerFill.Size = UDim2.fromScale(0.30, 1)
+        TimerFill.Position = UDim2.fromScale(-0.30, 0)
+        IndeterminateTween = TweenService:Create(
+            TimerFill,
+            TweenInfo.new(1.2, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, -1),
+            { Position = UDim2.fromScale(1, 0) }
+        )
+        IndeterminateTween:Play()
+    elseif typeof(Data.Time) == "Instance" then
         TimerFill.Size = UDim2.fromScale(0, 1)
     end
     if Data.SoundId then
