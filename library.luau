@@ -6638,6 +6638,9 @@ do
             Position = UDim2.fromOffset(Library.IsMobile and 8 or 10, ControlTopPadding),
             Size = UDim2.new(1, Library.IsMobile and -16 or -20, 0, ControlLabelHeight),
             Text = Input.Text,
+            -- Render the native committed-value indicator (Label: value).
+            -- The label is refreshed only when the input value is committed.
+            RichText = true,
             TextColor3 = LayeredStyle.MainText,
             TextSize = Library.IsMobile and 12 or 13,
             TextWrapped = WrapInputTitle,
@@ -6908,9 +6911,10 @@ do
                 end
 
                 if not Enter then
-                    if Input.ClearTextOnBlur then
-                        Box.Text = Input.Value
-                    end
+                    -- A draft is not saved until Enter: keep the textbox and
+                    -- green label in sync with the last accepted value.
+                    Box.Text = tostring(Input.Value or "")
+                    RefreshPreview()
                     return
                 end
 
