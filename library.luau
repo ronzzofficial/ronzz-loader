@@ -17429,6 +17429,10 @@ function Library:CreateWindow(WindowInfo)
     end
 
     function Window:Toggle(Value: boolean?)
+        -- During the multi-group startup, never show an unfinished window.
+        if Library.ZanjiStartupGate == true and Value ~= false then
+            return
+        end
         if Fading then
             return
         end
@@ -17641,6 +17645,8 @@ function Library:CreateWindow(WindowInfo)
         ToggleGui.IgnoreGuiInset = false
         ToggleGui.DisplayOrder = 2147483647
         ToggleGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+        -- Must be disabled *before* parenting to avoid a visible logo flash.
+        ToggleGui.Enabled = Library.ZanjiStartupGate ~= true
         ParentUI(ToggleGui)
         SetAlwaysOnTop(ToggleGui, true)
         Library.ZanjiToggleGui = ToggleGui
