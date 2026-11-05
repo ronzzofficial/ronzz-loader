@@ -1422,6 +1422,13 @@ local function ZanjiGardenDropdownRichText(value, semanticKind, formatted)
     end
     if quantity then
         local amount = tonumber(quantity)
+        local kind = tostring(semanticKind or "")
+        local isMultiplier = kind == "Variant" or kind == "FruitMutation"
+        -- Multipliers have normal neutral text; only inventory stock is
+        -- green/red. The dash and multiplier are never bold.
+        if isMultiplier then
+            return main .. " - x" .. quantity
+        end
         local color = amount == nil and "#9CA3AF"
             or (amount > 0 and "#43E17D" or "#FF646C")
         return main .. " - " .. '<font color="' .. color .. '">x'
@@ -1429,6 +1436,56 @@ local function ZanjiGardenDropdownRichText(value, semanticKind, formatted)
     end
     return main
 end
+-- Sort only Garden item dropdowns: AVAILABLE first, then highest rarity,
+-- then largest stock. Out-of-stock x0 stays below any positive stock, even if
+-- its rarity is higher. Plant/Fruit lists without counts sort by rarity.
+local ZanjiGardenItemRarityRank = {
+    common=1, uncommon=2, rare=3, legendary=4,
+    mythical=5, divine=6, prismatic=7, transcendent=8,
+}
+local function ZanjiGardenUsesItemSort(info)
+    if info.ZanjiGardenStyle ~= true then return false end
+    local label = tostring(info.Text or ""):lower()
+    return label == "seeds" or label == "plants" or label == "fruits"
+        or label == "waters" or label == "spray" or label == "sprinklers"
+end
+local function ZanjiGardenSortItemValues(values, info)
+    if not ZanjiGardenUsesItemSort(info) then return false end
+    local entries = {}
+    for _, value in ipairs(values) do
+        local display = tostring(value)
+        if type(info.FormatDisplayValue) == "function" then
+            local ok, output = pcall(info.FormatDisplayValue, value)
+            if ok and output ~= nil then display = tostring(output) end
+        end
+        local stock = display:match("%s+%-%s+x(%d+)$")
+        local rarity = display:match("%[([^%[%]]+)%]%s+%-%s+x%d+$")
+            or display:match("%[([^%[%]]+)%]%s*$")
+        local quantity = stock ~= nil and tonumber(stock) or nil
+        entries[value] = {
+            quantity = quantity,
+            rank = ZanjiGardenItemRarityRank[tostring(rarity or ""):lower()] or 0,
+            name = tostring(value):lower(),
+        }
+    end
+    table.sort(values, function(a,b)
+        local x,y = entries[a],entries[b]
+        -- When counts exist, known positive stock ALWAYS precedes zero.
+        local ax = x.quantity and x.quantity > 0 and 2
+            or (x.quantity == nil and 1 or 0)
+        local by = y.quantity and y.quantity > 0 and 2
+            or (y.quantity == nil and 1 or 0)
+        if ax ~= by then return ax > by end
+        if x.rank ~= y.rank then return x.rank > y.rank end
+        if x.quantity ~= nil and y.quantity ~= nil
+            and x.quantity ~= y.quantity then
+            return x.quantity > y.quantity
+        end
+        return x.name < y.name
+    end)
+    return true
+end
+
 local function ZanjiGardenBindRainbow(element, getValue)
     if not element or type(getValue) ~= "function" then return end
     ZanjiGardenRainbowLabels[element] = getValue
@@ -6786,9 +6843,9 @@ do
                 indicatorColor = "#FF646C"
             end
             Label.Text = EscapeInputRichText(Base)
-                .. ': <font color="' .. indicatorColor .. '">'
+                .. ': <font color="' .. indicatorColor .. '"><b>'
                 .. EscapeInputRichText(Saved)
-                .. "</font>"
+                .. "</b></font>"
         end
 
         RefreshSavedValueLabel()
@@ -9313,7 +9370,8 @@ local List = New("ScrollingFrame", {
         local function BuildOrderedValues(Query: string, PrioritizeSelected: boolean)
             -- Garden seed/watering lists stay alphabetical even when entries
             -- are checked. Other dropdowns retain their selected-first order.
-            if Info.ZanjiKeepAlphabetical == true then
+            if Info.ZanjiKeepAlphabetical == true
+                or ZanjiGardenUsesItemSort(Info) then
                 PrioritizeSelected = false
             end
             local Selected = {}
@@ -9339,7 +9397,8 @@ local List = New("ScrollingFrame", {
                 end
             end
 
-            if Info.ZanjiKeepAlphabetical == true then
+            if not ZanjiGardenSortItemValues(Unselected, Info)
+                and Info.ZanjiKeepAlphabetical == true then
                 table.sort(Unselected, function(a, b)
                     return tostring(a):lower() < tostring(b):lower()
                 end)
@@ -10252,6 +10311,14 @@ local List = New("ScrollingFrame", {
                 if type(Info.FormatDisplayValue) == "function" then
                     local ok, result = pcall(Info.FormatDisplayValue, Value)
                     if ok and result ~= nil then formatted = result end
+                elseif type(Library.ZanjiGardenMultiplierFormatter) == "function"
+                    and (Info.ZanjiColorKind == "Variant"
+                        or Info.ZanjiColorKind == "FruitMutation") then
+                    local ok, amount = pcall(Library.ZanjiGardenMultiplierFormatter,
+                        Info.ZanjiColorKind, Value)
+                    if ok and amount ~= nil then
+                        formatted = tostring(Value) .. " - x" .. tostring(amount)
+                    end
                 end
                 return ZanjiGardenDropdownRichText(Value, Info.ZanjiColorKind, formatted)
             end
@@ -11764,7 +11831,8 @@ local List = New("ScrollingFrame", {
         local function BuildOrderedValues(Query: string, PrioritizeSelected: boolean)
             -- Garden seed/watering lists stay alphabetical even when entries
             -- are checked. Other dropdowns retain their selected-first order.
-            if Info.ZanjiKeepAlphabetical == true then
+            if Info.ZanjiKeepAlphabetical == true
+                or ZanjiGardenUsesItemSort(Info) then
                 PrioritizeSelected = false
             end
             local Selected = {}
@@ -11782,7 +11850,8 @@ local List = New("ScrollingFrame", {
                 end
             end
     
-            if Info.ZanjiKeepAlphabetical == true then
+            if not ZanjiGardenSortItemValues(Unselected, Info)
+                and Info.ZanjiKeepAlphabetical == true then
                 table.sort(Unselected, function(a, b)
                     return tostring(a):lower() < tostring(b):lower()
                 end)
