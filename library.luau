@@ -1360,42 +1360,74 @@ local function ZanjiGardenEscape(value)
         :gsub(">", "&gt;"):gsub('"', "&quot;")
 end
 local function ZanjiGardenRainbowRichText()
-    local raw = "Rainbow"
-    local out = {}
-    local phase = os.clock() * 0.19
-    for i = 1, #raw do
-        local c = Color3.fromHSV((phase + (i - 1) / #raw) % 1, 0.86, 1)
-        local color = string.format("#%02X%02X%02X",
-            math.floor(c.R * 255 + 0.5),
-            math.floor(c.G * 255 + 0.5),
-            math.floor(c.B * 255 + 0.5))
-        out[#out + 1] = '<font color="' .. color .. '">'
-            .. raw:sub(i, i) .. '</font>'
+    -- FruitMutation_UI game diagnostic: one RichText color for the WHOLE
+    -- word, full saturation, cycling through HSV in ~5 seconds.
+    local c = Color3.fromHSV((os.clock() * 0.2) % 1, 1, 1)
+    local color = string.format("#%02X%02X%02X",
+        math.floor(c.R * 255 + 0.5),
+        math.floor(c.G * 255 + 0.5),
+        math.floor(c.B * 255 + 0.5))
+    return '<font color="' .. color .. '">Rainbow</font>'
+end
+-- Garden-only visual rarity badge colors. When the game publishes a
+-- rarity-color table, prefer it; otherwise use the familiar palette as a
+-- visual fallback. The rarity TEXT always comes from game metadata.
+local ZanjiGardenRarityColors = {
+    Common = "#B5B5B5", Uncommon = "#55D76D", Rare = "#559DFF",
+    Legendary = "#FFD452", Mythical = "#CF65FF", Divine = "#FFBA4D",
+    Prismatic = "#FF6BB2", Transcendent = "#FF616F",
+}
+local function ZanjiGardenRarityMarkup(rarity)
+    if not rarity or rarity == "" then return "" end
+    local key = tostring(rarity)
+    local color = ZanjiGardenRarityColors[key]
+    -- Prefer exact Color3 provided by the replicated game catalog, if any.
+    local liveColors = Library.ZanjiGardenRarityColors
+    local liveColor = type(liveColors) == "table" and liveColors[key] or nil
+    if typeof(liveColor) == "Color3" then
+        color = string.format("#%02X%02X%02X",
+            math.floor(liveColor.R * 255 + 0.5),
+            math.floor(liveColor.G * 255 + 0.5),
+            math.floor(liveColor.B * 255 + 0.5))
     end
-    return table.concat(out)
+    -- Unknown tiers should be displayed neutrally rather than guessed.
+    local label = "[" .. ZanjiGardenEscape(key) .. "]"
+    if not color then return " " .. label end
+    return ' <font color="' .. color .. '">' .. label .. '</font>'
 end
 local function ZanjiGardenDropdownRichText(value, semanticKind, formatted)
     local name = tostring(value or "")
     local display = tostring(formatted == nil and value or formatted)
-    local plainName, quantity = display:match("^(.-)%s+%-%s+x(%d+)$")
-    if plainName and quantity then
-        local amount = tonumber(quantity) or 0
-        local color = amount > 0 and "#43E17D" or "#FF646C"
-        -- The delimiter and item count are intentionally NOT bold.
-        return "<b>" .. ZanjiGardenEscape(plainName) .. "</b> - "
-            .. '<font color="' .. color .. '">x' .. quantity .. '</font>'
+    local bare, quantity = display:match("^(.-)%s+%-%s+x([%d%?]+)$")
+    local main = bare or display
+    local mainName, rarity = main:match("^(.-)%s+%[([^%[%]]+)%]$")
+    -- Only the item name is bold; [Rarity], the hyphen and xQuantity
+    -- are regular weight. RichText is for presentation only.
+    if mainName and rarity then
+        main = "<b>" .. ZanjiGardenEscape(mainName) .. "</b>"
+            .. ZanjiGardenRarityMarkup(rarity)
+    else
+        local kind = tostring(semanticKind or "")
+        if name == "Rainbow" and (kind == "Variant" or kind == "FruitMutation"
+            or kind == "PetMutation" or kind == "Auto") then
+            main = "<b>" .. ZanjiGardenRainbowRichText() .. "</b>"
+        else
+            local colored = nil
+            if kind ~= "" and type(ZanjiFormatDropdownOption) == "function" then
+                local ok, output = pcall(ZanjiFormatDropdownOption, "", name, kind)
+                if ok and type(output) == "string" then colored = output end
+            end
+            main = "<b>" .. (colored or ZanjiGardenEscape(main)) .. "</b>"
+        end
     end
-    local kind = tostring(semanticKind or "")
-    if name == "Rainbow" and (kind == "Variant" or kind == "FruitMutation"
-        or kind == "PetMutation" or kind == "Auto") then
-        return "<b>" .. ZanjiGardenRainbowRichText() .. "</b>"
+    if quantity then
+        local amount = tonumber(quantity)
+        local color = amount == nil and "#9CA3AF"
+            or (amount > 0 and "#43E17D" or "#FF646C")
+        return main .. " - " .. '<font color="' .. color .. '">x'
+            .. quantity .. '</font>'
     end
-    local colored = nil
-    if kind ~= "" and type(ZanjiFormatDropdownOption) == "function" then
-        local ok, output = pcall(ZanjiFormatDropdownOption, "", name, kind)
-        if ok and type(output) == "string" then colored = output end
-    end
-    return "<b>" .. (colored or ZanjiGardenEscape(display)) .. "</b>"
+    return main
 end
 local function ZanjiGardenBindRainbow(element, getValue)
     if not element or type(getValue) ~= "function" then return end
@@ -6802,6 +6834,8 @@ do
             Size = UDim2.new(1, -18, 1, 0),
             Text = tostring(Input.Value or ""),
             TextColor3 = LayeredStyle.MainText,
+            FontFace = Info.ZanjiGardenStyle == true
+                and Font.fromEnum(Enum.Font.GothamBold) or Library.Scheme.Font,
             TextSize = Library.IsMobile and 12 or 13,
             TextTruncate = Enum.TextTruncate.AtEnd,
             TextWrapped = false,
@@ -6822,6 +6856,8 @@ do
             Size = UDim2.fromScale(1, 1),
             Text = Input.Value,
             TextColor3 = LayeredStyle.MainText,
+            FontFace = Info.ZanjiGardenStyle == true
+                and Font.fromEnum(Enum.Font.GothamBold) or Library.Scheme.Font,
             TextEditable = not Input.Disabled,
             TextScaled = false,
             TextWrapped = false,
@@ -11667,6 +11703,10 @@ local List = New("ScrollingFrame", {
             Entry.Button.TextColor3 = LayeredStyle.MainText
             Entry.Button.TextTransparency = Entry.Disabled and 0.65 or 0
             Entry.Button.Text = FormatZanjiDropdownValue(Entry.Value)
+            Entry.Button.TextStrokeColor3 = Color3.new(0, 0, 0)
+            Entry.Button.TextStrokeTransparency =
+                Info.ZanjiGardenStyle == true and tostring(Entry.Value) == "Rainbow"
+                and 0.15 or 1
             -- Virtualized rows are recycled: release the old Rainbow binding
             -- before reusing a row for a different option.
             ZanjiGardenRainbowLabels[Entry.Button] = nil
@@ -12145,6 +12185,11 @@ local List = New("ScrollingFrame", {
                 end
             end
             Display.Text = (Str == "" and "---" or Str)
+            Display.TextStrokeColor3 = Color3.new(0, 0, 0)
+            Display.TextStrokeTransparency =
+                (Info.ZanjiGardenStyle == true and tostring(Str):find("Rainbow", 1, true)
+                    and (Info.ZanjiColorKind == "Variant"
+                        or Info.ZanjiColorKind == "FruitMutation")) and 0.15 or 1
             if Info.ZanjiGardenStyle == true
                 and (Info.ZanjiColorKind == "Variant"
                     or Info.ZanjiColorKind == "FruitMutation") then
