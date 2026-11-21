@@ -341,6 +341,386 @@ local LayeredStyle = {
     MutedText = Color3.fromRGB(112, 112, 122),
 }
 Library.LayeredStyle = LayeredStyle
++-- ZANJI_NATIVE_UI_COMPAT_V1
+local __ZanjiUICompat = {}
+function __ZanjiUICompat.SelectionMap(value)
+    local selected = {}
+    if type(value) == "table" then
+        for key, item in pairs(value) do
+            if item == true or (type(key) == "string" and item == 1) then
+                selected[key] = true
+            elseif type(key) == "number" and (type(item) == "string" or type(item) == "number") then
+                selected[item] = true
+            end
+        end
+    elseif type(value) == "string" or type(value) == "number" then
+        selected[value] = true
+    end
+    return selected
+end
+function __ZanjiUICompat.DefaultList(value)
+    local list = {}
+    for item in pairs(__ZanjiUICompat.SelectionMap(value)) do
+        table.insert(list, item)
+    end
+    return list
+end
+function __ZanjiUICompat.UUID(value)
+    if type(value) ~= "string" then return nil end
+    local plain = value:gsub("<[^>]->", "")
+    local uuid = plain:match("{([%w%-]+)}%s*$")
+        or plain:match("([%x]+%-%x+%-%x+%-%x+%-%x+)%s*$")
+    return uuid and uuid:lower() or nil
+end
+-- Set bold only on editable values and dropdown choices. The dropdown's
+-- heading stays regular, including pet-team names with a bold fraction.
+__ZanjiUICompat.StyledTextBoxes = setmetatable({}, {__mode = "k"})
+function __ZanjiUICompat.KeepTextBoxBold(field)
+    if typeof(field) ~= "Instance" or not field:IsA("TextBox") then return end
+    local function bold()
+        if not field.Parent then return end
+        pcall(function()
+            local font = field.FontFace
+            if font.Weight ~= Enum.FontWeight.Bold then
+                field.FontFace = Font.new(font.Family, Enum.FontWeight.Bold, font.Style)
+            end
+        end)
+    end
+    bold()
+    if __ZanjiUICompat.StyledTextBoxes[field] then return end
+    __ZanjiUICompat.StyledTextBoxes[field] = true
+    -- Obsidian applies the unfocused style when Enter commits an input.
+    -- Re-apply after its FocusLost handler and after later theme/font changes.
+    field.FocusLost:Connect(function()
+        task.defer(bold)
+        -- Finished=true inputs can repaint after their commit callback and
+        -- after the library's own delayed label/value update.
+        task.delay(0.08, bold)
+        task.delay(0.2, bold)
+    end)
+    field:GetPropertyChangedSignal("FontFace"):Connect(bold)
+    pcall(function() field:GetPropertyChangedSignal("Font"):Connect(bold) end)
+end
+function __ZanjiUICompat.BoldControlValues(control, isDropdown)
+    if type(control) ~= "table" then return end
+    local title = tostring(control.Text or "")
+    local plainTitle = title:gsub("<[^>]->", ""):gsub("^%s+", ""):gsub("%s+$", "")
+    local visited = {}
+    local function apply(root)
+        if typeof(root) ~= "Instance" or visited[root] then return end
+        visited[root] = true
+        local objects = {root}
+        for _, child in ipairs(root:GetDescendants()) do objects[#objects + 1] = child end
+        for _, obj in ipairs(objects) do
+            local eligible = obj:IsA("TextBox")
+            local partialRichText = false
+            if isDropdown and (obj:IsA("TextLabel") or obj:IsA("TextButton")) then
+                local text = tostring(obj.Text or "")
+                local plain = text:gsub("<[^>]->", ""):gsub("^%s+", ""):gsub("%s+$", "")
+                local teamHeading = text:find(":%s*<b>") ~= nil
+                -- Pet Type labels contain a bold name followed by a colored
+                -- rarity. Keeping the overall font regular lets RichText
+                -- bold only the name, without also bolding the rarity.
+                partialRichText = text:find("<b>", 1, true) ~= nil
+                    and text:find("</b>", 1, true) ~= nil
+                    and not teamHeading
+                    and text:find("</b>", 1, true) < #text
+                if text:find("<font", 1, true) or text:find("<b>", 1, true) then
+                    pcall(function() obj.RichText = true end)
+                end
+                eligible = text ~= "" and text ~= title and plain ~= plainTitle and not teamHeading
+            end
+            if obj:IsA("TextBox") then
+                __ZanjiUICompat.KeepTextBoxBold(obj)
+            elseif partialRichText then
+                pcall(function()
+                    local font = obj.FontFace
+                    obj.FontFace = Font.new(font.Family, Enum.FontWeight.Regular, font.Style)
+                end)
+            elseif eligible then
+                pcall(function()
+                    local font = obj.FontFace
+                    obj.FontFace = Font.new(font.Family, Enum.FontWeight.Bold, font.Style)
+                end)
+            end
+        end
+    end
+    apply(control.Holder)
+    apply(control.Container)
+    apply(control.TextBox)
+    apply(control.InputBox)
+    apply(control.Input)
+    apply(control.Frame)
+    if isDropdown then
+        apply(control.Menu)
+        apply(control.Popup)
+        apply(control.PopupFrame)
+        if type(control.Menu) == "table" then
+            apply(control.Menu.Frame)
+            apply(control.Menu.Holder)
+        end
+    end
+end
+-- The library creates its searchable choices inside a full-screen dialog,
+-- not inside the dropdown's Holder/Menu. Style visible rows by their real
+-- option values so unrelated labels and the dialog heading stay unchanged.
+local function FindDropdownDialogRoot(screenGui)
+    local function isVisible(obj)
+        local node = obj
+        while node and node ~= screenGui do
+            if node:IsA("GuiObject") and not node.Visible then return false end
+            node = node.Parent
+        end
+        return node == screenGui and screenGui.Enabled ~= false
+    end
+    for _, candidate in ipairs(screenGui:GetDescendants()) do
+        -- Search items... is inside the separate modal opened by a dropdown,
+        -- while Garden/Progression section headers live outside that modal.
+        if candidate:IsA("TextBox")
+            and tostring(candidate.PlaceholderText or ""):lower():find("search", 1, true)
+            and isVisible(candidate) then
+            local ancestor = candidate.Parent
+            while ancestor and ancestor ~= screenGui do
+                if ancestor:IsA("GuiObject") and isVisible(ancestor) then
+                    for _, item in ipairs(ancestor:GetDescendants()) do
+                        if (item:IsA("TextButton") or item:IsA("TextLabel"))
+                            and tostring(item.Text or ""):lower() == "close"
+                            and isVisible(item) then
+                            return ancestor
+                        end
+                    end
+                end
+                ancestor = ancestor.Parent
+            end
+        end
+    end
+    return nil
+end
+-- An asynchronous post-open repaint used to show a visibly regular font for
+-- one or more frames. Listen before rows mount and style synchronously.
+__ZanjiUICompat.PopupFontWatcher = setmetatable({}, {__mode = "k"})
+function __ZanjiUICompat.EnsurePopupFontWatcher(dropdown)
+    if type(dropdown) ~= "table" then return nil end
+    local holder = dropdown.Holder or dropdown.Container or dropdown.Frame
+    if typeof(holder) ~= "Instance" then return nil end
+    local screenGui = holder:FindFirstAncestorWhichIsA("ScreenGui")
+    if not screenGui then return nil end
+    local watcher = __ZanjiUICompat.PopupFontWatcher[screenGui]
+    if not watcher then
+        watcher = {
+            choices = {},
+            byDropdown = setmetatable({}, {__mode = "k"}),
+            observed = setmetatable({}, {__mode = "k"}),
+        }
+        __ZanjiUICompat.PopupFontWatcher[screenGui] = watcher
+        function watcher:Style(obj)
+            if not (obj:IsA("TextLabel") or obj:IsA("TextButton")) then return end
+            local value = tostring(obj.Text or "")
+            local plain = value:gsub("<[^>]->", ""):gsub("^%s+", ""):gsub("%s+$", "")
+            if not self.choices[plain] or self.choices[plain] <= 0 then return end
+            -- A large dropdown mounts many option rows in succession. Reusing
+            -- its current dialog avoids scanning the entire UI for every row.
+            -- Re-discover when the modal is destroyed or a new one is opened.
+            local popupRoot = self.popupRoot
+            if not popupRoot or not popupRoot.Parent or not obj:IsDescendantOf(popupRoot) then
+                popupRoot = FindDropdownDialogRoot(screenGui)
+                self.popupRoot = popupRoot
+            end
+            if not popupRoot or not obj:IsDescendantOf(popupRoot) then return end
+            local partial = value:find("<b>", 1, true) ~= nil
+                and value:find("</b>", 1, true) ~= nil
+                and value:find("</b>", 1, true) < #value
+            pcall(function()
+                if value:find("<font", 1, true) or partial then obj.RichText = true end
+                local font = obj.FontFace
+                local weight = partial and Enum.FontWeight.Regular or Enum.FontWeight.Bold
+                if font.Weight ~= weight then
+                    obj.FontFace = Font.new(font.Family, weight, font.Style)
+                end
+            end)
+        end
+        screenGui.DescendantAdded:Connect(function(obj)
+            if not (obj:IsA("TextLabel") or obj:IsA("TextButton")) then return end
+            local value = tostring(obj.Text or "")
+            local plain = value:gsub("<[^>]->", ""):gsub("^%s+", ""):gsub("%s+$", "")
+            if not watcher.observed[obj] and (value == "" or (watcher.choices[plain] or 0) > 0) then
+                watcher.observed[obj] = true
+                -- Text can be assigned after parenting; the first visible
+                -- value will already have its correct font.
+                obj:GetPropertyChangedSignal("Text"):Connect(function() watcher:Style(obj) end)
+                obj:GetPropertyChangedSignal("FontFace"):Connect(function() watcher:Style(obj) end)
+            end
+            watcher:Style(obj)
+        end)
+    end
+    -- Update only this dropdown's catalog. Scanning every registered dropdown
+    -- whenever a large inventory changes caused quadratic UI work.
+    local previous = watcher.byDropdown[dropdown] or {}
+    for choice in pairs(previous) do
+        watcher.choices[choice] = math.max(0, (watcher.choices[choice] or 0) - 1)
+    end
+    local choices = {}
+    for _, row in ipairs(dropdown.Values or {}) do
+        local value = type(row) == "table" and (row.Value or row.Text) or row
+        local label = type(row) == "table" and (row.Text or row.Value) or row
+        for _, candidate in ipairs({value, label}) do
+            local plain = tostring(candidate or ""):gsub("<[^>]->", "")
+                :gsub("^%s+", ""):gsub("%s+$", "")
+            if plain ~= "" then choices[plain] = true end
+        end
+    end
+    watcher.byDropdown[dropdown] = choices
+    for choice in pairs(choices) do
+        watcher.choices[choice] = (watcher.choices[choice] or 0) + 1
+    end
+    return watcher, screenGui
+end
+function __ZanjiUICompat.BoldDropdownPopup(dropdown)
+    local watcher, screenGui = __ZanjiUICompat.EnsurePopupFontWatcher(dropdown)
+    if not watcher then return end
+    local popupRoot = FindDropdownDialogRoot(screenGui)
+    if not popupRoot then return end
+    for _, obj in ipairs(popupRoot:GetDescendants()) do
+        watcher:Style(obj)
+    end
+end
+-- Ordinary dropdowns display literal markup when a feature passes RichText
+-- choice strings. Promote such catalogs to the native value-label control,
+-- the same rendering path used by Garden fruit and plant selectors. This
+-- applies to every module without altering plain-option dropdown behavior.
+function __ZanjiUICompat.RichTextChoiceRows(values)
+    local rows = {}
+    for _, choice in ipairs(type(values) == "table" and values or {}) do
+        if type(choice) == "string" then
+            rows[#rows + 1] = {Value = choice, Text = choice}
+        elseif type(choice) == "table" then
+            rows[#rows + 1] = choice
+        end
+    end
+    return rows
+end
+function __ZanjiUICompat.TryPromoteRichDropdown(box, idx, info)
+    if type(info) ~= "table" or info.ZanjiRichTextPromoted == true
+        or type(box.AddValueDropdown) ~= "function" then return nil end
+    local formatted = false
+    for _, choice in ipairs(type(info.Values) == "table" and info.Values or {}) do
+        local label = type(choice) == "table" and choice.Text or choice
+        if type(label) == "string" and (
+            label:find("<b>", 1, true) or label:find("<font", 1, true)
+            or label:find("<stroke", 1, true) or label:find("<i>", 1, true)
+            or label:find("<u>", 1, true)) then
+            formatted = true
+            break
+        end
+    end
+    if not formatted then return nil end
+    info.ZanjiRichTextPromoted = true
+    info.LabelValueDropdown = true
+    info.Values = __ZanjiUICompat.RichTextChoiceRows(info.Values)
+    local dropdown = box:AddValueDropdown(idx, info)
+    if dropdown and type(dropdown.SetValues) == "function" then
+        local setValues = dropdown.SetValues
+        function dropdown:SetValues(values, ...)
+            return setValues(self, __ZanjiUICompat.RichTextChoiceRows(values), ...)
+        end
+    end
+    return dropdown
+end
+function __ZanjiUICompat.InstallInput(input)
+    if input.ZanjiBoldInputInstalled then return end
+    input.ZanjiBoldInputInstalled = true
+    local setValue = input.SetValue
+    if type(setValue) == "function" then
+        function input:SetValue(...)
+            local results = table.pack(setValue(self, ...))
+            __ZanjiUICompat.BoldControlValues(self, false)
+            return table.unpack(results, 1, results.n)
+        end
+    end
+    local holder = input.Holder or input.Container
+    if typeof(holder) == "Instance" then
+        holder.DescendantAdded:Connect(function(obj)
+            if obj:IsA("TextBox") then
+                __ZanjiUICompat.KeepTextBoxBold(obj)
+            end
+        end)
+    end
+    __ZanjiUICompat.BoldControlValues(input, false)
+    task.defer(function() __ZanjiUICompat.BoldControlValues(input, false) end)
+end
+function __ZanjiUICompat.InstallDropdown(dropdown)
+    if dropdown.ZanjiCompatibilityInstalled then return end
+    dropdown.ZanjiCompatibilityInstalled = true
+    -- Keep large dropdowns virtualized so opening stays instant.
+    -- Actual inventory/value refresh remains manual-only elsewhere.
+    dropdown.VirtualDropdownThreshold = tonumber(dropdown.VirtualDropdownThreshold) or 80
+    local setValue, setValues = dropdown.SetValue, dropdown.SetValues
+    -- Keep a saved multi-selection even if the server has only replicated
+    -- some of the inventory/fruit choices. A deliberate SetValue (including
+    -- Clear / Select All) replaces the held selection immediately.
+    function dropdown:SetValue(value, suppressCallback)
+        self.ZanjiRetainedCatalogSelection = nil
+        if self.Multi then value = __ZanjiUICompat.SelectionMap(value) end
+        local results = table.pack(setValue(self, value, suppressCallback))
+        __ZanjiUICompat.BoldControlValues(self, true)
+        return table.unpack(results, 1, results.n)
+    end
+    function dropdown:SetValues(values)
+        local previous = self.ZanjiRetainedCatalogSelection
+            or (type(self.Value) == "table" and table.clone(self.Value) or self.Value)
+        setValues(self, type(values) == "table" and values or {})
+        local known, byUUID = {}, {}
+        for _, value in ipairs(self.Values or {}) do
+            local candidate = type(value) == "table" and (value.Value or value.Text) or value
+            known[candidate] = candidate
+            local uuid = __ZanjiUICompat.UUID(candidate)
+            if uuid then byUUID[uuid] = candidate end
+        end
+        local function resolve(value)
+            if value ~= nil and known[value] then return known[value] end
+            local uuid = __ZanjiUICompat.UUID(value)
+            return uuid and byUUID[uuid] or nil
+        end
+        if self.Multi then
+            local restored, missing = {}, false
+            local desired = __ZanjiUICompat.SelectionMap(previous)
+            for value in pairs(desired) do
+                local current = resolve(value)
+                if current ~= nil then restored[current] = true else missing = true end
+            end
+            self.ZanjiRetainedCatalogSelection = missing and desired or nil
+            setValue(self, restored, true)
+        else
+            local found = resolve(previous)
+            self.ZanjiRetainedCatalogSelection = previous ~= nil and found == nil and previous or nil
+            setValue(self, found, true)
+        end
+        __ZanjiUICompat.BoldControlValues(self, true)
+        __ZanjiUICompat.EnsurePopupFontWatcher(self)
+    end
+    if type(dropdown.BuildDropdownList) == "function" then
+        local buildDropdownList = dropdown.BuildDropdownList
+        function dropdown:BuildDropdownList(...)
+            __ZanjiUICompat.EnsurePopupFontWatcher(self)
+            local results = table.pack(buildDropdownList(self, ...))
+            __ZanjiUICompat.BoldControlValues(self, true)
+            __ZanjiUICompat.BoldDropdownPopup(self)
+            return table.unpack(results, 1, results.n)
+        end
+    end
+    __ZanjiUICompat.BoldControlValues(dropdown, true)
+    __ZanjiUICompat.EnsurePopupFontWatcher(dropdown)
+    task.defer(function() __ZanjiUICompat.BoldControlValues(dropdown, true) end)
+    -- The current dropdown renderer replaced the pool, but SetDPIScale still
+    -- calls its old refresh method. Rebuild only its existing displayed data.
+    if type(dropdown.RefreshPool) ~= "function" then
+        function dropdown:RefreshPool()
+            self:BuildDropdownList(self.Menu and self.Menu.Active == true)
+        end
+    end
+end
+Library.ZanjiNativeCompatVersion = 1
+Library.ZanjiBoldControlValues = __ZanjiUICompat.BoldControlValues
 
 if RunService:IsStudio() then
     if UserInputService.TouchEnabled and not UserInputService.MouseEnabled then
@@ -6744,6 +7124,9 @@ do
     function Funcs:AddInput(Idx, Info)
         if self.Destroyed then return nil end
 
+        Info = Info or {}
+        if Info.ZanjiGardenStyle == nil then Info.ZanjiGardenStyle = true end
+
         if typeof(Info) == "table" and (typeof(Info.VerifyValue) == "function" and Info.Finished ~= true) then
             Info.Finished = true
         end
@@ -7211,6 +7594,7 @@ do
             Input.Default = Input.EmptyReset
         end
 
+        __ZanjiUICompat.InstallInput(Input)
         Options[Idx] = Input
 
         function Input:Destroy()
@@ -7702,6 +8086,8 @@ do
     end
 
     function Funcs:AddValueDropdown(Idx, Info)
+        Info = Info or {}
+        if Info.ZanjiGardenStyle == nil then Info.ZanjiGardenStyle = true end
         Info = Library:Validate(Info, Templates.Dropdown)
         Info.LabelValueDropdown = true
 
@@ -8112,7 +8498,7 @@ do
         local SearchInput = New("TextBox", {
             BackgroundColor3 = LayeredStyle.InputBox,
             BorderSizePixel = 0,
-            PlaceholderText = "Search items...",
+            PlaceholderText = tostring(Info.SearchPlaceholder or "Search items..."),
             PlaceholderColor3 = LayeredStyle.SecondaryText,
             ClearTextOnFocus = false,
             TextColor3 = LayeredStyle.MainText,
@@ -8326,7 +8712,7 @@ local List = New("ScrollingFrame", {
         }
         local VirtualDropdownThreshold = tonumber(Info.VirtualDropdownThreshold) or (Library.IsMobile and 64 or 80)
         local VirtualDropdownBuffer = tonumber(Info.VirtualDropdownBuffer) or 12
-        
+
         local function ClearDropdownList()
             VirtualState.Active = false
             VirtualState.Values = {}
@@ -10093,23 +10479,23 @@ local List = New("ScrollingFrame", {
         --     Dropdown:BuildDropdownList(true)
         --     Dropdown:UpdateColors()
         -- end
-        
+
         function MenuState:Open()
             -- V11.21: opening is passive; never refresh/rebuild data from RefreshFunc here.
             if MenuState.Active or Dropdown.Disabled then
                 return
             end
-        
+
             if SearchInput.Visible and SearchInput.Text ~= "" then
                 SearchInput.Text = ""
             end
-        
+
             MenuState.Active = true
             ClickBlocker.Visible = true
             Popup.Visible = true
             Title.Text = Dropdown.Text or "Select"
             UpdateCloseButtonStyle()
-        
+
             Dropdown:BuildDropdownList(true)
             Dropdown:UpdateColors()
         end
@@ -10214,6 +10600,9 @@ local List = New("ScrollingFrame", {
         end)
 
 
+        if Info.Multi and type(Info.Default) == "table" then
+            Info.Default = __ZanjiUICompat.DefaultList(Info.Default)
+        end
         local Defaults = {}
         local function AddDefaultValue(Value)
             local Index = table.find(Dropdown.Values, Value)
@@ -10269,15 +10658,23 @@ local List = New("ScrollingFrame", {
         Dropdown.Holder = Holder
         table.insert(Groupbox.Elements, Dropdown)
 
+        __ZanjiUICompat.InstallDropdown(Dropdown)
         Options[Idx] = Dropdown
         return Dropdown
     end
 
-     
 
-        
+
+
 
     function Funcs:AddDropdown(Idx, Info)
+        Info = Info or {}
+        if Info.ZanjiGardenStyle == nil then Info.ZanjiGardenStyle = true end
+        if Info.VirtualDropdownThreshold == nil then
+            Info.VirtualDropdownThreshold = Library.IsMobile and 64 or 80
+        end
+        local richValueDropdown = __ZanjiUICompat.TryPromoteRichDropdown(self, Idx, Info)
+        if richValueDropdown ~= nil then return richValueDropdown end
         Info = Library:Validate(Info, Templates.Dropdown)
 
         if Info.AllowNull == true and Info.Multi ~= true then
@@ -10301,10 +10698,10 @@ local List = New("ScrollingFrame", {
                 Info.Values = cleaned
             end
         end
-    
+
         local Groupbox = self
         local Container = Groupbox.Container
-    
+
         if Info.SpecialType == "Player" then
             Info.Values = GetPlayers(Info.ExcludeLocalPlayer)
             Info.AllowNull = true
@@ -10312,29 +10709,29 @@ local List = New("ScrollingFrame", {
             Info.Values = GetTeams()
             Info.AllowNull = true
         end
-    
+
         local Dropdown = {
             Text = typeof(Info.Text) == "string" and Info.Text or nil,
             Value = Info.Multi and {} or nil,
             Values = Info.Values,
             DisabledValues = Info.DisabledValues,
             Multi = Info.Multi,
-    
+
             SpecialType = Info.SpecialType,
             ExcludeLocalPlayer = Info.ExcludeLocalPlayer,
-    
+
             Tooltip = Info.Tooltip,
             DisabledTooltip = Info.DisabledTooltip,
             TooltipTable = nil,
-    
+
             Callback = Info.Callback,
             Changed = Info.Changed,
             RefreshFunc = Info.RefreshFunc or Info.RefreshValues,
             InventoryRefresh = Info.InventoryRefresh == true,
-    
+
             Disabled = Info.Disabled,
             Visible = Info.Visible,
-    
+
             Type = "Dropdown",
         }
 
@@ -10400,7 +10797,7 @@ local List = New("ScrollingFrame", {
             Thickness = 1,
             Parent = Holder,
         })
-    
+
         local Label = New("TextLabel", {
             BackgroundTransparency = 1,
             Position = UDim2.fromOffset(CompactMobileDropdown and 8 or 10, DropdownTopPadding),
@@ -10415,7 +10812,7 @@ local List = New("ScrollingFrame", {
             ZIndex = 2,
             Parent = Holder,
         })
-    
+
         local Display = New("TextButton", {
             Active = not Dropdown.Disabled,
             AnchorPoint = Vector2.zero,
@@ -10435,12 +10832,12 @@ local List = New("ScrollingFrame", {
             ZIndex = 1,
             Parent = Holder,
         })
-    
+
         New("UICorner", {
             CornerRadius = UDim.new(0, Library.CornerRadius),
             Parent = Display,
         })
-    
+
         New("UIPadding", {
             PaddingLeft = UDim.new(0, 9),
             -- Reserve only the chevron footprint; the chevron itself is parented
@@ -10454,7 +10851,7 @@ local List = New("ScrollingFrame", {
             Thickness = 1,
             Parent = Display,
         })
-    
+
         local ArrowImage = New("ImageLabel", {
             AnchorPoint = Vector2.new(1, 0.5),
             Image = ArrowIcon and ArrowIcon.Url or "",
@@ -11011,7 +11408,7 @@ local List = New("ScrollingFrame", {
 
         end
 
-    
+
         Display.MouseEnter:Connect(function()
             if Dropdown.Disabled then return end
             TweenService:Create(Display, Library.TweenInfo, {
@@ -11046,7 +11443,7 @@ local List = New("ScrollingFrame", {
             ZIndex = 119,
             Parent = Library.ScreenGui,
         })
-    
+
         local Popup = New("Frame", {
             Active = true,
             AnchorPoint = Vector2.new(0.5, 0.5),
@@ -11061,12 +11458,12 @@ local List = New("ScrollingFrame", {
             ZIndex = 120,
             Parent = Library.ScreenGui,
         })
-    
+
         New("UICorner", {
             CornerRadius = UDim.new(0, Library.CornerRadius + 2),
             Parent = Popup,
         })
-    
+
         New("UIStroke", {
             ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
             Thickness = 1.2,
@@ -11074,38 +11471,38 @@ local List = New("ScrollingFrame", {
             Color = LayeredStyle.Border,
             Parent = Popup,
         })
-    
+
         local PopupHeaderBg = New("Frame", {
             BackgroundColor3 = LayeredStyle.OuterBox,
             BorderSizePixel = 0,
             ZIndex = 120,
             Parent = Popup,
         })
-    
+
         New("UICorner", {
             CornerRadius = UDim.new(0, Library.CornerRadius + 1),
             Parent = PopupHeaderBg,
         })
-    
+
         local PopupHeaderDivider = New("Frame", {
             BackgroundColor3 = LayeredStyle.Separator,
             BorderSizePixel = 0,
             ZIndex = 121,
             Parent = Popup,
         })
-    
+
         local PopupBody = New("Frame", {
             BackgroundColor3 = LayeredStyle.InnerBox,
             BorderSizePixel = 0,
             ZIndex = 121,
             Parent = Popup,
         })
-    
+
         New("UICorner", {
             CornerRadius = UDim.new(0, Library.CornerRadius + 1),
             Parent = PopupBody,
         })
-    
+
         New("UIStroke", {
             ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
             Color = LayeredStyle.Border,
@@ -11120,7 +11517,7 @@ local List = New("ScrollingFrame", {
             ZIndex = 122,
             Parent = Popup,
         })
-    
+
         local Title = New("TextLabel", {
             BackgroundTransparency = 1,
             Text = Dropdown.Text or "Select",
@@ -11131,7 +11528,7 @@ local List = New("ScrollingFrame", {
             ZIndex = 123,
             Parent = Header,
         })
-    
+
         local CloseButton = New("TextButton", {
             BackgroundColor3 = LayeredStyle.InputBox,
             BorderSizePixel = 0,
@@ -11141,12 +11538,12 @@ local List = New("ScrollingFrame", {
             ZIndex = 123,
             Parent = Header,
         })
-    
+
         New("UICorner", {
             CornerRadius = UDim.new(0, Library.CornerRadius + 1),
             Parent = CloseButton,
         })
-    
+
         local CloseButtonStroke = New("UIStroke", {
             ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
             Color = Library.Scheme.AccentColor,
@@ -11154,11 +11551,11 @@ local List = New("ScrollingFrame", {
             Transparency = 0.45,
             Parent = CloseButton,
         })
-    
+
         local SearchInput = New("TextBox", {
             BackgroundColor3 = LayeredStyle.InputBox,
             BorderSizePixel = 0,
-            PlaceholderText = "Search items...",
+            PlaceholderText = tostring(Info.SearchPlaceholder or "Search items..."),
             PlaceholderColor3 = LayeredStyle.SecondaryText,
             ClearTextOnFocus = false,
             TextColor3 = LayeredStyle.MainText,
@@ -11170,12 +11567,12 @@ local List = New("ScrollingFrame", {
             ZIndex = 123,
             Parent = PopupBody,
         })
-    
+
         New("UICorner", {
             CornerRadius = UDim.new(0, Library.CornerRadius),
             Parent = SearchInput,
         })
-    
+
         local SearchInputStroke = New("UIStroke", {
             ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
             Color = LayeredStyle.Border,
@@ -11188,7 +11585,7 @@ local List = New("ScrollingFrame", {
             PaddingRight = UDim.new(0, 8),
             Parent = SearchInput,
         })
-    
+
         local function RefreshSearchTypingVisual()
             -- Keep mobile search text readable at every edit state.
             -- Do not recolor an empty focused TextBox to fake-hide the caret.
@@ -11290,12 +11687,12 @@ local List = New("ScrollingFrame", {
             ZIndex = 123,
             Parent = PopupBody,
         })
-    
+
         New("UICorner", {
             CornerRadius = UDim.new(0, Library.CornerRadius + 1),
             Parent = List,
         })
-    
+
         local ListLayout = New("UIListLayout", {
             HorizontalAlignment = Enum.HorizontalAlignment.Center,
             Padding = UDim.new(0, 4),
@@ -11317,7 +11714,7 @@ local List = New("ScrollingFrame", {
             Size = UDim2.new(1, 0, 0, 4),
             Parent = List,
         })
-    
+
         local ResizeHandle = New("TextButton", {
             AnchorPoint = Vector2.new(1, 1),
             AutoButtonColor = false,
@@ -11330,12 +11727,12 @@ local List = New("ScrollingFrame", {
             ZIndex = 124,
             Parent = Popup,
         })
-    
+
         New("UICorner", {
             CornerRadius = UDim.new(0, 4),
             Parent = ResizeHandle,
         })
-    
+
         local Buttons = {}
         local MenuState = { Active = false, Menu = Popup }
         local PopupFixedWidth = tonumber(Info.PopupWidth) or 560
@@ -11354,7 +11751,7 @@ local List = New("ScrollingFrame", {
         }
         local VirtualDropdownThreshold = tonumber(Info.VirtualDropdownThreshold) or (Library.IsMobile and 64 or 80)
         local VirtualDropdownBuffer = tonumber(Info.VirtualDropdownBuffer) or 12
-        
+
         local function ClearDropdownList()
             VirtualState.Active = false
             VirtualState.Values = {}
@@ -11367,7 +11764,7 @@ local List = New("ScrollingFrame", {
                     Button:Destroy()
                 end
             end
-        
+
             table.clear(Buttons)
             table.clear(VirtualState.Rows)
 
@@ -11376,14 +11773,14 @@ local List = New("ScrollingFrame", {
             List.CanvasSize = UDim2.fromOffset(0, 0)
             List.CanvasPosition = Vector2.zero
         end
-    
+
         local function IsSelected(Value)
             if Info.Multi then
                 return Dropdown.Value[Value] == true
             end
             return Dropdown.Value == Value
         end
-    
+
         local function UpdateCloseButtonStyle()
             if Info.Multi then
                 CloseButton.Text = "Done"
@@ -11397,7 +11794,7 @@ local List = New("ScrollingFrame", {
                 CloseButtonStroke.Transparency = 0.35
             end
         end
-    
+
         local function GetPopupMetrics()
             local camera = workspace.CurrentCamera
             local viewport = (camera and camera.ViewportSize)
@@ -11646,30 +12043,30 @@ local List = New("ScrollingFrame", {
                 and math.max(46, math.floor(closeH * 1.68))
                 or math.max(78, math.floor(closeH * 2.05))
             local bodyTop, innerPadX, innerPadY, listTop
-    
+
             Popup.Size = UDim2.fromOffset(M.width, M.height)
-    
+
             Header.Position = UDim2.fromOffset(M.padX, M.padY)
             Header.Size = UDim2.new(1, -M.padX * 2, 0, M.headerH)
-    
+
             Title.Position = UDim2.fromOffset(0, 0)
             Title.Size = UDim2.new(1, -(closeW + 12), 1, 0)
             Title.TextSize = M.titleText
-    
+
             CloseButton.Size = UDim2.fromOffset(closeW, closeH)
             CloseButton.Position = UDim2.new(1, -closeW, 0.5, -math.floor(closeH / 2))
             CloseButton.TextSize = math.max(12, M.inputText - 1)
-    
+
             PopupHeaderBg.Position = UDim2.fromOffset(0, 0)
             PopupHeaderBg.Size = UDim2.new(1, 0, 0, M.padY + M.headerH + M.gap * 0.65)
-    
+
             PopupHeaderDivider.Position = UDim2.fromOffset(0, math.floor(M.padY + M.headerH + M.gap * 0.65))
             PopupHeaderDivider.Size = UDim2.new(1, 0, 0, 1)
-    
+
             bodyTop = math.floor(M.padY + M.headerH + M.gap + 2)
             PopupBody.Position = UDim2.fromOffset(M.padX, bodyTop)
             PopupBody.Size = UDim2.new(1, -M.padX * 2, 1, -(bodyTop + M.padY))
-    
+
             innerPadX = math.max(10, math.floor(M.padX * 0.7))
             innerPadY = math.max(10, math.floor(M.padY * 0.65))
 
@@ -11770,7 +12167,7 @@ local List = New("ScrollingFrame", {
             CurrentRowHeight = M.rowH
             CurrentOptionTextSize = M.optionText
             ListLayout.Padding = UDim.new(0, CurrentRowGap)
-    
+
             for _, Entry in pairs(Buttons) do
                 Entry.Button.Size = UDim2.new(1, Library.IsMobile and -8 or -16, 0, CurrentRowHeight)
                 Entry.Button.TextSize = CurrentOptionTextSize
@@ -11782,7 +12179,7 @@ local List = New("ScrollingFrame", {
                 RenderVirtualRows(true)
             end
         end
-    
+
         local function UpdateEntry(Entry)
             local selected = IsSelected(Entry.Value)
             local rowStroke = Entry.Button:FindFirstChild("ZanjiDropdownRowStroke")
@@ -11840,27 +12237,27 @@ local List = New("ScrollingFrame", {
                 UpdateEntry(Entry)
             end
         end
-    
+
         local function ClosePopup()
             if not MenuState.Active then
                 return
             end
-    
+
             MenuState.Active = false
             ClickBlocker.Visible = false
             Popup.Visible = false
-            
+
             ClearDropdownList()
-    
+
             if UserInputService:GetFocusedTextBox() == SearchInput then
                 pcall(function()
                     SearchInput:ReleaseFocus()
                 end)
             end
-    
+
             Dropdown:UpdateColors()
         end
-    
+
         local function BuildOrderedValues(Query: string, PrioritizeSelected: boolean)
             -- Garden seed/watering lists stay alphabetical even when entries
             -- are checked. Other dropdowns retain their selected-first order.
@@ -11871,19 +12268,19 @@ local List = New("ScrollingFrame", {
             end
             local Selected = {}
             local Unselected = {}
-    
+
             for _, Value in pairs(Dropdown.Values or {}) do
                 if Query ~= "" and not tostring(Value):lower():find(Query, 1, true) then
                     continue
                 end
-    
+
                 if PrioritizeSelected and IsSelected(Value) then
                     table.insert(Selected, Value)
                 else
                     table.insert(Unselected, Value)
                 end
             end
-    
+
             if not ZanjiGardenSortMultiplierValues(Unselected, Info)
                 and not ZanjiGardenSortItemValues(Unselected, Info)
                 and Info.ZanjiKeepAlphabetical == true then
@@ -11894,41 +12291,41 @@ local List = New("ScrollingFrame", {
             if not PrioritizeSelected then
                 return Unselected
             end
-    
+
             for i = 1, #Unselected do
                 table.insert(Selected, Unselected[i])
             end
-    
+
             return Selected
         end
-    
+
         local function ApplySelection(Value)
             local wasSelected = IsSelected(Value)
             local nextSelected = not wasSelected
-    
+
             if Dropdown:GetActiveValues() == 1 and not nextSelected and not Info.AllowNull then
                 return
             end
-    
+
             if Info.Multi then
                 Dropdown.Value[Value] = nextSelected and true or nil
             else
                 Dropdown.Value = nextSelected and Value or nil
             end
-    
+
             Dropdown:Display()
             RefreshButtons()
             RefreshDropdownHolderHeight()
-    
+
             Library:SafeCallback(Dropdown.Callback, Dropdown.Value)
             Library:SafeCallback(Dropdown.Changed, Dropdown.Value)
             Library:UpdateDependencyBoxes()
-    
+
             if not Info.Multi then
                 ClosePopup()
             end
         end
-    
+
         local function CreateDropdownButton(LayoutOrder)
             local Button = New("TextButton", {
                 BackgroundColor3 = LayeredStyle.DropdownRow,
@@ -12171,11 +12568,11 @@ local List = New("ScrollingFrame", {
             local query = SearchInput.Visible and (SearchInput.Text or ""):lower() or ""
             local orderedValues = BuildOrderedValues(query, PrioritizeSelected == true)
             local disabledLookup = {}
-    
+
             for _, Value in pairs(Dropdown.DisabledValues or {}) do
                 disabledLookup[Value] = true
             end
-    
+
             ClearDropdownList()
 
             if #orderedValues > VirtualDropdownThreshold then
@@ -12205,7 +12602,7 @@ local List = New("ScrollingFrame", {
 
             ListLayout.Parent = List
             List.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    
+
             for i = 1, #orderedValues do
                 local Value = orderedValues[i]
                 local IsDisabled = disabledLookup[Value] == true
@@ -12216,41 +12613,41 @@ local List = New("ScrollingFrame", {
                     Disabled = IsDisabled,
                     Hovered = false,
                 }
-    
+
                 Buttons[Button] = Entry
                 UpdateEntry(Entry)
             end
-    
+
             List.CanvasPosition = Vector2.zero
             ApplyPopupLayout()
             Dropdown:Display()
         end
-    
+
         function Dropdown:BuildDropdownListNew()
             Dropdown:BuildDropdownList(true)
         end
-    
+
         function Dropdown:RecalculateListSize(_)
         end
-    
+
         function Dropdown:UpdateColors()
             if Library.Unloaded then
                 return
             end
-    
+
             Label.TextTransparency = Dropdown.Disabled and 0.8 or 0
             Display.TextTransparency = Dropdown.Disabled and 0.8 or 0
             ArrowImage.ImageTransparency = Dropdown.Disabled and 0.8 or (MenuState.Active and 0 or 0.28)
             ArrowImage.Rotation = MenuState.Active and 180 or 0
         end
-    
+
         function Dropdown:Display()
             if Library.Unloaded then
                 return
             end
-    
+
             local Str = ""
-    
+
             if Info.Multi then
                 local SelectedCount = 0
                 local TotalCount = 0
@@ -12275,7 +12672,7 @@ local List = New("ScrollingFrame", {
             else
                 Str = Dropdown.Value and FormatZanjiDropdownValue(Dropdown.Value) or ""
             end
-    
+
             if Info.AllowNull == true and Info.Multi ~= true
                 and ZanjiIsEmptyDropdownValue(Str) then
                 Str = ""
@@ -12314,7 +12711,7 @@ local List = New("ScrollingFrame", {
             end
             UpdateTextTruncateForActualWidth(Display, 0, true)
         end
-    
+
         function Dropdown:OnChanged(Func)
             Dropdown.Changed = Func
         end
@@ -12356,7 +12753,7 @@ local List = New("ScrollingFrame", {
             Library:SafeCallback(Dropdown.Callback, Dropdown.Value)
             Library:SafeCallback(Dropdown.Changed, Dropdown.Value)
         end
-    
+
         function Dropdown:GetActiveValues()
             if Info.Multi then
                 local Table = {}
@@ -12367,7 +12764,7 @@ local List = New("ScrollingFrame", {
             end
             return Dropdown.Value and 1 or 0
         end
-    
+
         function Dropdown:SetValue(Value, suppressCallback)
             if Info.AllowNull == true and Info.Multi ~= true
                 and ZanjiIsEmptyDropdownValue(Value) then
@@ -12376,13 +12773,13 @@ local List = New("ScrollingFrame", {
 
             if Info.Multi then
                 local Table = {}
-    
+
                 for Val, Active in pairs(Value or {}) do
                     if Active and table.find(Dropdown.Values, Val) then
                         Table[Val] = true
                     end
                 end
-    
+
                 Dropdown.Value = Table
             else
                 if table.find(Dropdown.Values, Value) then
@@ -12391,10 +12788,10 @@ local List = New("ScrollingFrame", {
                     Dropdown.Value = nil
                 end
             end
-    
+
             Dropdown:Display()
             RefreshButtons()
-    
+
             if not Dropdown.Disabled then
                 Library:UpdateDependencyBoxes()
                 if not suppressCallback then
@@ -12402,12 +12799,12 @@ local List = New("ScrollingFrame", {
                 end
             end
         end
-    
+
         function Dropdown:SetValues(Values)
             Dropdown.Values = Values
             Dropdown:BuildDropdownList(MenuState.Active)
         end
-    
+
         function Dropdown:AddValues(Values)
             if typeof(Values) == "table" then
                 for _, val in pairs(Values) do
@@ -12418,15 +12815,15 @@ local List = New("ScrollingFrame", {
             else
                 return
             end
-    
+
             Dropdown:BuildDropdownList(MenuState.Active)
         end
-    
+
         function Dropdown:SetDisabledValues(DisabledValues)
             Dropdown.DisabledValues = DisabledValues
             Dropdown:BuildDropdownList(MenuState.Active)
         end
-    
+
         function Dropdown:AddDisabledValues(DisabledValues)
             if typeof(DisabledValues) == "table" then
                 for _, val in pairs(DisabledValues) do
@@ -12437,17 +12834,17 @@ local List = New("ScrollingFrame", {
             else
                 return
             end
-    
+
             Dropdown:BuildDropdownList(MenuState.Active)
         end
-    
+
         function Dropdown:SetDisabled(Disabled: boolean)
             Dropdown.Disabled = Disabled
-    
+
             if Dropdown.TooltipTable then
                 Dropdown.TooltipTable.Disabled = Dropdown.Disabled
             end
-    
+
             ClosePopup()
             Display.Active = not Dropdown.Disabled
 
@@ -12459,13 +12856,13 @@ local List = New("ScrollingFrame", {
 
             Dropdown:UpdateColors()
         end
-    
+
         function Dropdown:SetVisible(Visible: boolean)
             Dropdown.Visible = Visible
             Holder.Visible = Dropdown.Visible
             Groupbox:Resize()
         end
-    
+
         function Dropdown:SetText(Text: string)
             Dropdown.Text = Text
 
@@ -12476,50 +12873,50 @@ local List = New("ScrollingFrame", {
 
             RefreshDropdownHolderHeight()
         end
-    
+
         -- function MenuState:Open_old()
         --     if MenuState.Active or Dropdown.Disabled then
         --         return
         --     end
-    
+
         --     MenuState.Active = true
         --     ClickBlocker.Visible = true
         --     Popup.Visible = true
         --     Title.Text = Dropdown.Text or "Select"
         --     UpdateCloseButtonStyle()
-    
+
         --     if SearchInput.Visible then
         --         SearchInput.Text = ""
         --     end
-    
+
         --     Dropdown:BuildDropdownList(true)
         --     Dropdown:UpdateColors()
         -- end
-        
+
         function MenuState:Open()
             -- V11.21: opening is passive; never refresh/rebuild data from RefreshFunc here.
             if MenuState.Active or Dropdown.Disabled then
                 return
             end
-        
+
             if SearchInput.Visible and SearchInput.Text ~= "" then
                 SearchInput.Text = ""
             end
-        
+
             MenuState.Active = true
             ClickBlocker.Visible = true
             Popup.Visible = true
             Title.Text = Dropdown.Text or "Select"
             UpdateCloseButtonStyle()
-        
+
             Dropdown:BuildDropdownList(true)
             Dropdown:UpdateColors()
         end
-    
+
         function MenuState:Close()
             ClosePopup()
         end
-    
+
         function MenuState:Toggle()
             if MenuState.Active then
                 ClosePopup()
@@ -12527,14 +12924,14 @@ local List = New("ScrollingFrame", {
                 MenuState:Open()
             end
         end
-    
+
         Display.MouseButton1Click:Connect(function()
             if Dropdown.Disabled then
                 return
             end
             MenuState:Toggle()
         end)
-    
+
         CloseButton.Activated:Connect(ClosePopup)
         ClickBlocker.Activated:Connect(ClosePopup)
 
@@ -12574,7 +12971,7 @@ local List = New("ScrollingFrame", {
         RefreshButton.MouseButton1Click:Connect(function()
             Dropdown:RefreshValues()
         end)
-    
+
         Library:GiveSignal(List:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
             if VirtualState.Active and RenderVirtualRows then
                 RenderVirtualRows(false)
@@ -12587,18 +12984,21 @@ local List = New("ScrollingFrame", {
                 Dropdown:BuildDropdownList(true)
             end)
         end
-    
+
         if Library.ScreenGui then
             Library:GiveSignal(Library.ScreenGui:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
                 ApplyPopupLayout()
             end))
         end
-    
+
         pcall(function()
             Library:MakeDraggable(Popup, Header, false, true)
         end)
-    
-    
+
+
+        if Info.Multi and type(Info.Default) == "table" then
+            Info.Default = __ZanjiUICompat.DefaultList(Info.Default)
+        end
         local Defaults = {}
         if typeof(Info.Default) == "string" then
             local Index = table.find(Dropdown.Values, Info.Default)
@@ -12615,7 +13015,7 @@ local List = New("ScrollingFrame", {
         elseif Dropdown.Values[Info.Default] ~= nil then
             table.insert(Defaults, Info.Default)
         end
-    
+
         if next(Defaults) then
             for i = 1, #Defaults do
                 local Index = Defaults[i]
@@ -12624,18 +13024,18 @@ local List = New("ScrollingFrame", {
                 else
                     Dropdown.Value = Dropdown.Values[Index]
                 end
-    
+
                 if not Info.Multi then
                     break
                 end
             end
         end
-    
+
         if typeof(Dropdown.Tooltip) == "string" or typeof(Dropdown.DisabledTooltip) == "string" then
             Dropdown.TooltipTable = Library:AddTooltip(Dropdown.Tooltip, Dropdown.DisabledTooltip, Display)
             Dropdown.TooltipTable.Disabled = Dropdown.Disabled
         end
-    
+
         UpdateCloseButtonStyle()
         Dropdown.Menu = MenuState
         Dropdown:UpdateColors()
@@ -12643,19 +13043,20 @@ local List = New("ScrollingFrame", {
         Dropdown:BuildDropdownList(false)
         ApplyPopupLayout()
         Groupbox:Resize()
-    
+
         RefreshDropdownHolderHeight()
 
         Dropdown.Holder = Holder
         table.insert(Groupbox.Elements, Dropdown)
-    
+
+        __ZanjiUICompat.InstallDropdown(Dropdown)
         Options[Idx] = Dropdown
         return Dropdown
     end
-    
 
- 
-   
+
+
+
 
     function Funcs:AddViewport(Idx, Info)
         if self.Destroyed then return nil end
@@ -13671,6 +14072,12 @@ local List = New("ScrollingFrame", {
 
             Depbox.Visible = true
             DepboxContainer.Visible = true
+            for _, Element in ipairs(Depbox.Elements) do
+                if Element.Holder then Element.Holder.Visible = Element.Visible ~= false end
+            end
+            for _, Child in ipairs(Depbox.DependencyBoxes) do
+                if type(Child.Update) == "function" then Child:Update(true) end
+            end
             if not Library.Searching then
                 task.defer(function()
                     Depbox:Resize()
@@ -19018,8 +19425,8 @@ function Library:Unload()
 end
 
 getgenv().Library = Library
-Library.ZanjiBuild = "2026-11-02-v13-dual-quickcast-row"
+Library.ZanjiBuild = "2026-11-21-v13-native-ui-controls"
 Library.UIHost = "PlayerGui"
-pcall(function() print("[ZANJI UI] Library build: V13.00 Dual Quick Cast row") end)
+pcall(function() print("[ZANJI UI] Library build: V13 native controls") end)
 
 return Library
