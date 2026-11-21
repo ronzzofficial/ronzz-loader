@@ -461,6 +461,22 @@ function __ZanjiUICompat.BoldControlValues(control, isDropdown)
         end
     end
 end
+-- Style only the recycled option row being displayed. The dropdown renderer
+-- already knows the exact row; scanning every Gui descendant per open is slow.
+function __ZanjiUICompat.StyleRowButton(obj)
+    if typeof(obj) ~= "Instance" or not (obj:IsA("TextButton") or obj:IsA("TextLabel")) then return end
+    local value = tostring(obj.Text or "")
+    local close = value:find("</b>", 1, true)
+    local hasUnboldSuffix = close and value:sub(close + 4):match("%S") ~= nil
+    pcall(function()
+        if value:find("<font", 1, true) or close then obj.RichText = true end
+        local font = obj.FontFace
+        local desired = hasUnboldSuffix and Enum.FontWeight.Regular or Enum.FontWeight.Bold
+        if font.Weight ~= desired then
+            obj.FontFace = Font.new(font.Family, desired, font.Style)
+        end
+    end)
+end
 -- The library creates its searchable choices inside a full-screen dialog,
 -- not inside the dropdown's Holder/Menu. Style visible rows by their real
 -- option values so unrelated labels and the dialog heading stay unchanged.
@@ -662,7 +678,6 @@ function __ZanjiUICompat.InstallDropdown(dropdown)
         self.ZanjiRetainedCatalogSelection = nil
         if self.Multi then value = __ZanjiUICompat.SelectionMap(value) end
         local results = table.pack(setValue(self, value, suppressCallback))
-        __ZanjiUICompat.BoldControlValues(self, true)
         return table.unpack(results, 1, results.n)
     end
     function dropdown:SetValues(values)
@@ -695,22 +710,10 @@ function __ZanjiUICompat.InstallDropdown(dropdown)
             self.ZanjiRetainedCatalogSelection = previous ~= nil and found == nil and previous or nil
             setValue(self, found, true)
         end
-        __ZanjiUICompat.BoldControlValues(self, true)
-        __ZanjiUICompat.EnsurePopupFontWatcher(self)
-    end
-    if type(dropdown.BuildDropdownList) == "function" then
-        local buildDropdownList = dropdown.BuildDropdownList
-        function dropdown:BuildDropdownList(...)
-            __ZanjiUICompat.EnsurePopupFontWatcher(self)
-            local results = table.pack(buildDropdownList(self, ...))
-            __ZanjiUICompat.BoldControlValues(self, true)
-            __ZanjiUICompat.BoldDropdownPopup(self)
-            return table.unpack(results, 1, results.n)
-        end
     end
     __ZanjiUICompat.BoldControlValues(dropdown, true)
-    __ZanjiUICompat.EnsurePopupFontWatcher(dropdown)
-    task.defer(function() __ZanjiUICompat.BoldControlValues(dropdown, true) end)
+    -- Popup rows are styled on creation/virtual rebind below. Never walk the
+    -- full popup descendant tree on each open or stock refresh.
     -- The current dropdown renderer replaced the pool, but SetDPIScale still
     -- calls its old refresh method. Rebuild only its existing displayed data.
     if type(dropdown.RefreshPool) ~= "function" then
@@ -1774,6 +1777,68 @@ local function ZanjiGardenRarityMarkup(rarity)
     local label = "[" .. ZanjiGardenEscape(key) .. "]"
     if not color then return " " .. label end
     return ' <font color="' .. color .. '">' .. label .. '</font>'
+end
+-- Shared quantity and rarity styling for ALL option sources, including the
+-- Market's preformatted value-label catalogs. Do not wrap an already-colored
+-- rarity/stock span a second time, and keep mutation multipliers neutral.
+local function ZanjiTintDropdownOption(value, semanticKind)
+    local text = tostring(value or "")
+    local rarity = text:match("%[([^%[%]]+)%]")
+    if rarity then
+        local color = ZanjiGardenRarityColors[rarity]
+        if not color then
+            for known, knownColor in pairs(ZanjiGardenRarityColors) do
+                if known:lower() == rarity:lower() then
+                    color = knownColor
+                    break
+                end
+            end
+        end
+        local token = "[" .. rarity .. "]"
+        if color and not text:find(token .. "</font>", 1, true) then
+            local first, last = text:find(token, 1, true)
+            if first then
+                text = text:sub(1, first - 1)
+                    .. '<font color="' .. color .. '">' .. token .. '</font>'
+                    .. text:sub(last + 1)
+            end
+        end
+    end
+    if semanticKind == "Variant" or semanticKind == "FruitMutation" then
+        return text
+    end
+    text = text:gsub("([%s%-])([xX]%d+)", function(before, token)
+        local amount = tonumber(token:sub(2))
+        if amount == nil then return before .. token end
+        local color = amount > 0 and "#43E17D" or "#FF646C"
+        return before .. '<font color="' .. color .. '">' .. token .. '</font>'
+    end)
+    return text
+end
+-- Popup metrics need a width estimate, not a TextService call for every stock
+-- row every time a market dropdown opens. Measure the longest few candidates.
+local function ZanjiDropdownMaxTextWidth(values, toText, font, textSize)
+    local candidates = {}
+    for _, value in pairs(values or {}) do
+        local plain = tostring(toText(value) or ""):gsub("<[^<>]->", "")
+        local charCount = #plain
+        if charCount > 0 then
+            local insertAt = #candidates + 1
+            for i, entry in ipairs(candidates) do
+                if charCount > entry.length then insertAt = i; break end
+            end
+            if insertAt <= 6 then
+                table.insert(candidates, insertAt, {text = plain, length = charCount})
+                if #candidates > 6 then table.remove(candidates) end
+            end
+        end
+    end
+    local maximum = 0
+    for _, candidate in ipairs(candidates) do
+        local textWidth = Library:GetTextBounds(candidate.text, font, textSize, 100000)
+        maximum = math.max(maximum, textWidth)
+    end
+    return maximum
 end
 local function ZanjiGardenDropdownRichText(value, semanticKind, formatted)
     local name = tostring(value or "")
@@ -8759,11 +8824,11 @@ local List = New("ScrollingFrame", {
             if UseValueOptions then
                 local Option = Dropdown.OptionByValue and Dropdown.OptionByValue[Value]
                 if Option and Option.Text ~= nil then
-                    return Option.Text
+                    return ZanjiTintDropdownOption(Option.Text, Info.ZanjiColorKind)
                 end
             end
 
-            return Value
+            return ZanjiTintDropdownOption(Value, Info.ZanjiColorKind)
         end
 
         local function GetRowInputInfo(Value, Slot)
@@ -8856,13 +8921,15 @@ local List = New("ScrollingFrame", {
                 local Text = Option and Option.Text or Value
 
                 if Info.FormatDisplayValue then
-                    return Info.FormatDisplayValue(Value, Text, Option)
+                    return ZanjiTintDropdownOption(Info.FormatDisplayValue(Value, Text, Option), Info.ZanjiColorKind)
                 end
 
-                return Text
+                return ZanjiTintDropdownOption(Text, Info.ZanjiColorKind)
             end
 
-            return Info.FormatDisplayValue and Info.FormatDisplayValue(Value) or Value
+            return ZanjiTintDropdownOption(
+                Info.FormatDisplayValue and Info.FormatDisplayValue(Value) or Value,
+                Info.ZanjiColorKind)
         end
 
         local function GetSearchText(Value)
@@ -8951,15 +9018,9 @@ local List = New("ScrollingFrame", {
                     return tostring(text or ""):gsub("<[^<>]->", "")
                 end
 
-                local longestTextWidth = 0
-                for _, value in ipairs(Dropdown.Values or {}) do
-                    longestTextWidth = math.max(longestTextWidth, Library:GetTextBounds(
-                        mobilePlainText(value),
-                        Library.Scheme.Font,
-                        optionText,
-                        100000
-                    ))
-                end
+                local longestTextWidth = ZanjiDropdownMaxTextWidth(
+                    Dropdown.Values, mobilePlainText, Library.Scheme.Font, optionText
+                )
 
                 -- Mobile dropdown text keeps the UI-scaled font size. The popup
                 -- grows horizontally to fit the longest value, then clamps only
@@ -9027,18 +9088,10 @@ local List = New("ScrollingFrame", {
             local desiredWidth = PopupFixedWidth
             local measureTextSize = 14
 
-            for _, Value in pairs(Dropdown.Values or {}) do
-                local displayText = StripRichText(GetOptionText(Value))
-                local textWidth = Library:GetTextBounds(
-                    displayText,
-                    Library.Scheme.Font,
-                    measureTextSize,
-                    100000
-                )
-
-                -- Covers popup/body/list margins, row padding and scrollbar.
-                desiredWidth = math.max(desiredWidth, math.ceil(textWidth + 150))
-            end
+            -- Covers popup/body/list margins, row padding and scrollbar.
+            desiredWidth = math.max(desiredWidth, math.ceil(ZanjiDropdownMaxTextWidth(
+                Dropdown.Values, GetOptionText, Library.Scheme.Font, measureTextSize
+            ) + 150))
 
             if Dropdown.Text and Dropdown.Text ~= "" then
                 local titleWidth = Library:GetTextBounds(
@@ -9654,6 +9707,7 @@ local List = New("ScrollingFrame", {
                 Entry.RowInputSaved.Visible = true
                 Entry.RowInputRoot.Visible = true
                 Entry.RowInputName.Text = tostring(GetOptionText(Entry.Value))
+                __ZanjiUICompat.StyleRowButton(Entry.RowInputName)
 
                 local currentValue = ResolveRowInputValue(RowInfo, Entry.Value)
                 Entry.RowInputCommitted = currentValue
@@ -9722,6 +9776,7 @@ local List = New("ScrollingFrame", {
                 Entry.RowInputSaved.TextTransparency = Entry.Disabled and 0.65 or 0
             else
                 Entry.Button.Text = tostring(GetOptionText(Entry.Value))
+                __ZanjiUICompat.StyleRowButton(Entry.Button)
                 if Entry.RowInputRoot then
                     Entry.RowInputName.Visible = false
                     Entry.RowInputSaved.Visible = false
@@ -11849,15 +11904,9 @@ local List = New("ScrollingFrame", {
                     return tostring(text or ""):gsub("<[^<>]->", "")
                 end
 
-                local longestTextWidth = 0
-                for _, value in ipairs(Dropdown.Values or {}) do
-                    longestTextWidth = math.max(longestTextWidth, Library:GetTextBounds(
-                        mobilePlainText(value),
-                        Library.Scheme.Font,
-                        optionText,
-                        100000
-                    ))
-                end
+                local longestTextWidth = ZanjiDropdownMaxTextWidth(
+                    Dropdown.Values, mobilePlainText, Library.Scheme.Font, optionText
+                )
 
                 -- Mobile dropdown text keeps the UI-scaled font size. The popup
                 -- grows horizontally to fit the longest value, then clamps only
@@ -11918,18 +11967,10 @@ local List = New("ScrollingFrame", {
             local desiredWidth = PopupFixedWidth
             local measureTextSize = 14
 
-            for _, Value in pairs(Dropdown.Values or {}) do
-                local displayText = tostring(FormatZanjiDropdownValue(Value) or ""):gsub("<[^<>]->", "")
-                local textWidth = Library:GetTextBounds(
-                    displayText,
-                    Library.Scheme.Font,
-                    measureTextSize,
-                    100000
-                )
-
-                -- Covers popup/body/list margins, row padding and scrollbar.
-                desiredWidth = math.max(desiredWidth, math.ceil(textWidth + 150))
-            end
+            -- Covers popup/body/list margins, row padding and scrollbar.
+            desiredWidth = math.max(desiredWidth, math.ceil(ZanjiDropdownMaxTextWidth(
+                Dropdown.Values, FormatZanjiDropdownValue, Library.Scheme.Font, measureTextSize
+            ) + 150))
 
             if Dropdown.Text and Dropdown.Text ~= "" then
                 local titleText = tostring(Dropdown.Text):gsub("<[^<>]->", "")
@@ -12199,7 +12240,8 @@ local List = New("ScrollingFrame", {
             Entry.Button.BackgroundTransparency = 0
             Entry.Button.TextColor3 = LayeredStyle.MainText
             Entry.Button.TextTransparency = Entry.Disabled and 0.65 or 0
-            Entry.Button.Text = FormatZanjiDropdownValue(Entry.Value)
+            Entry.Button.Text = ZanjiTintDropdownOption(FormatZanjiDropdownValue(Entry.Value), Info.ZanjiColorKind)
+            __ZanjiUICompat.StyleRowButton(Entry.Button)
             Entry.Button.TextStrokeColor3 = Color3.new(0, 0, 0)
             Entry.Button.TextStrokeTransparency =
                 Info.ZanjiGardenStyle == true and tostring(Entry.Value) == "Rainbow"
@@ -12685,7 +12727,7 @@ local List = New("ScrollingFrame", {
                     Str = "<b>" .. tostring(Str) .. "</b>"
                 end
             end
-            Display.Text = (Str == "" and "---" or Str)
+            Display.Text = ZanjiTintDropdownOption(Str == "" and "---" or Str, Info.ZanjiColorKind)
             Display.TextStrokeColor3 = Color3.new(0, 0, 0)
             Display.TextStrokeTransparency =
                 (Info.ZanjiGardenStyle == true and tostring(Str):find("Rainbow", 1, true)
