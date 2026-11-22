@@ -10279,6 +10279,9 @@ local List = New("ScrollingFrame", {
             end
 
             Display.Text = (Str == "" and "---" or Str)
+            -- Recycled popup rows already honor <b>name</b> + normal suffix.
+            -- Match that same base weight in the closed value field.
+            __ZanjiUICompat.StyleRowButton(Display)
             UpdateTextTruncateForActualWidth(Display, 0, true)
         end
 
@@ -12728,6 +12731,7 @@ local List = New("ScrollingFrame", {
                 end
             end
             Display.Text = ZanjiTintDropdownOption(Str == "" and "---" or Str, Info.ZanjiColorKind)
+            __ZanjiUICompat.StyleRowButton(Display)
             Display.TextStrokeColor3 = Color3.new(0, 0, 0)
             Display.TextStrokeTransparency =
                 (Info.ZanjiGardenStyle == true and tostring(Str):find("Rainbow", 1, true)
