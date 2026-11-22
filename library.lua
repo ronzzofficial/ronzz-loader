@@ -341,6 +341,141 @@ local LayeredStyle = {
     MutedText = Color3.fromRGB(112, 112, 122),
 }
 Library.LayeredStyle = LayeredStyle
+-- BEGIN ZANJI SHARED PRESENTATION
+-- Pure, bounded display helpers used by all five groups and the live HUD.
+Library.ZanjiPresentationVersion = 1
+function Library:CompactText(value, limit, firstSentence)
+    local text = tostring(value or ""):gsub("<[^>]->", "")
+        :gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+    if firstSentence then text = text:match("^(.-[.!?])%s+") or text end
+    limit = math.max(4, math.floor(tonumber(limit) or 82))
+    local length, invalidAt = utf8.len(text)
+    -- Legacy callers may have cut a multibyte pet/plant name mid-character.
+    if not length then
+        text = text:sub(1, invalidAt - 1):gsub("%s+$", "")
+        length = utf8.len(text)
+    end
+    if length and length > limit then
+        local boundary = utf8.offset(text, limit - 2)
+        text = text:sub(1, boundary - 1):gsub("%s+$", "") .. "..."
+    end
+    return text
+end
+
+local ZanjiStatusAliases = {
+    stopped="Stopped", idle="Stopped", off="Stopped", disabled="Stopped",
+    running="Running", active="Running", processing="Running", working="Running",
+    switching="Running", claiming="Running", waiting="Waiting", checking="Waiting",
+    paused="Paused", busy="Waiting", stopping="Stopping", starting="Starting",
+    loading="Starting", preparing="Starting", resuming="Starting",
+    completed="Done", complete="Done", done="Done", failed="Error", error="Error",
+}
+local ZanjiStatusIcons = {
+    Stopped="🔴", Running="🟢", Waiting="🟡", Paused="🟡",
+    Stopping="🟡", Starting="🟡", Done="🟢", Error="🔴",
+}
+local function ZanjiStripStatusIcon(text)
+    for _, icon in ipairs({"🔴", "🟡", "🟢"}) do
+        if text:sub(1, #icon) == icon then
+            return text:sub(#icon + 1):gsub("^%s+", ""), icon
+        end
+    end
+    return text, nil
+end
+function Library:IsAutomationStatus(value)
+    local text = self:CompactText(value, 10000)
+    local raw, icon = ZanjiStripStatusIcon(text)
+    if icon or raw:match("^Status:") then return true end
+    if raw:lower() == "not running" then return true end
+    local word, rest = raw:match("^(%a+)(.*)$")
+    return word ~= nil and ZanjiStatusAliases[word:lower()] ~= nil
+        and (rest == "" or rest:match("^%s*•") ~= nil
+            or rest:match("^%s*[:%-]") ~= nil)
+end
+function Library:IsDividerText(value)
+    local text = tostring(value or ""):gsub("%s+", "")
+    return text ~= "" and text:gsub("─", ""):gsub("━", ""):gsub("[-_]", "") == ""
+end
+function Library:ResolveAutomationStatus(value, enabled)
+    if enabled == false then return "Stopped", "Idle" end
+    local text = tostring(value or ""):gsub("<[^>]->", "")
+    text = text:gsub("^%s*Status:%s*", ""):gsub("[\r\n]+Info:%s*", " • ")
+    text = self:CompactText(text, 10000)
+    local raw, icon = ZanjiStripStatusIcon(text)
+    raw = raw:gsub("^[Aa]uto [Cc]raft:%s*", ""):gsub("^[Aa]uto [Cc]ook:%s*", "")
+    if raw == "" then return "Stopped", "Idle" end
+    local word, rest = raw:match("^(%a+)(.*)$")
+    local state = word and ZanjiStatusAliases[word:lower()]
+    local detail = raw
+    local separated = rest and (rest:match("^%s*•%s*(.*)$")
+        or rest:match("^%s*:%s*(.*)$") or rest:match("^%s*%-%s*(.*)$"))
+    if state and (rest == "" or separated ~= nil) then
+        detail = separated or ""
+        if word:lower() == "busy" and detail == "" then detail = "Busy" end
+    else
+        -- Only infer state for legacy messages without an explicit state.
+        -- Words inside an explicit Waiting/Running detail never change it.
+        local lower = raw:lower()
+        if lower == "not running" or lower:match("^stopped") or lower:match(" off$") then
+            state = "Stopped"
+        elseif lower:match("^paused") then state = "Paused"
+        elseif lower:match("^stopping") then state = "Stopping"
+        elseif lower:match("^starting") or lower:match("^loading") or lower:match("^preparing") then state = "Starting"
+        elseif lower:match("^error") or lower:find("failed", 1, true) or lower:find("invalid", 1, true) then state = "Error"
+        elseif lower:match("^completed") or lower:match("^finished") or lower:match("^claimed ")
+            or lower:match("^fed ") or lower:match("^collected ") or lower:match("^watered ") then state = "Done"
+        elseif lower:match("^waiting") or lower:match("^no ") or lower:match("^select ")
+            or lower:find("inventory full", 1, true)
+            or lower:match("^need ") or lower:match("^nothing") or lower:match("^out of ")
+            or lower:match("^checking") or lower:match("^confirming") or lower:find("missing", 1, true)
+            or lower:find("unavailable", 1, true) or lower:find("not found", 1, true)
+            or lower:find("cooldown", 1, true) or lower:find("feed in", 1, true)
+            or icon == "🟡" then state = "Waiting"
+        else state = state or "Running" end
+        if state == "Waiting" and raw:match("^[Nn]o ") then
+            detail = raw:match("^.-%s+%-%s+(.*)$") or raw:match("^.-%s+•%s+(.*)$") or detail
+        end
+    end
+    if state == "Stopped" then return state, "Idle" end
+    detail = detail:gsub("Plant_RE", "Planting"):gsub("Plants_Physical", "Farm plants")
+        :gsub("Can_Plant", "Planting area"):gsub("Water_RE", "Watering")
+        :gsub("TrowelRemote", "Plant moving"):gsub("Remove_Item", "Item removal")
+        :gsub("ReclaimerService_RE", "Reclaimer"):gsub("Crops%.Collect", "Fruit collection")
+        :gsub("PetMutationMachineService_RE", "Mutation Machine")
+        :gsub("FireServer%(%)", ""):gsub("[Ww]ebhook", "notification")
+        :gsub("[Ll]evel%s+(%d+)%s*/%s*(%d+)", "Age %1/%2")
+    if (utf8.len(detail) or 0) > 48 then
+        local age = detail:match("[Aa]ge%s+%d+%s*/%s*%d+")
+        local kg = detail:match("[Kk][Gg]%s*[%d%.]+%s*/%s*[%d%.]+")
+            or detail:match("[%d%.]+%s*/%s*[%d%.]+%s*[Kk][Gg]")
+        if age or kg then detail = table.concat({age or "", kg or ""}, " • "):gsub("^ • ", ""):gsub(" • $", "") end
+    end
+    detail = self:CompactText(detail, 48)
+    if detail == "" or detail:lower() == state:lower() or detail:lower() == "active and running" then
+        detail = ({Running="Active", Waiting="Waiting", Paused="Paused", Starting="Starting",
+            Stopping="Stopping", Done="Complete", Error="Check settings"})[state]
+    end
+    return state, detail
+end
+function Library:FormatAutomationStatus(value, enabled)
+    local state, detail = self:ResolveAutomationStatus(value, enabled)
+    local text = ZanjiStatusIcons[state] .. " " .. state
+    if detail ~= "Idle" and detail ~= "Active" and detail ~= "Complete"
+        and detail:lower() ~= state:lower() then text ..= " • " .. detail end
+    return text
+end
+function Library:SetStartupScheduler(callback)
+    self.StartupScheduler = callback
+    self.StartupLastYieldAt = os.clock()
+end
+function Library:CheckpointUI()
+    if type(self.StartupScheduler) == "function" and os.clock() - self.StartupLastYieldAt >= 0.006 then
+        assert(self.StartupScheduler(nil, false), "[ZANJI] UI startup superseded or stopped")
+        self.StartupLastYieldAt = os.clock()
+    end
+end
+-- END ZANJI SHARED PRESENTATION
+
 -- ZANJI_NATIVE_UI_COMPAT_V1
 local __ZanjiUICompat = {}
 function __ZanjiUICompat.SelectionMap(value)
@@ -1716,7 +1851,14 @@ end
 
 function Library:Validate(Table: { [string]: any }, Template: { [string]: any }): { [string]: any }
     if typeof(Table) ~= "table" then
-        return Template
+        -- Each control owns its defaults, including nested selection tables.
+        local Defaults = table.clone(Template)
+        for Key, Value in pairs(Defaults) do
+            if typeof(Value) == "table" then
+                Defaults[Key] = Library:Validate(nil, Value)
+            end
+        end
+        return Defaults
     end
 
     for k, v in Template do
@@ -2009,6 +2151,7 @@ local function FillInstance(Table: { [string]: any }, Instance: GuiObject)
 end
 
 local function New(ClassName: string, Properties: { [string]: any }): any
+    Library:CheckpointUI()
     local Instance = Instance.new(ClassName)
 
     -- Slightly rounded rectangular controls (up to 5 px).
@@ -3618,6 +3761,8 @@ end)
 
 local CurrentHoverInstance
 function Library:AddTooltip(InfoStr: string, DisabledInfoStr: string, HoverInstance: GuiObject)
+    if type(InfoStr) == "string" then InfoStr = self:CompactText(InfoStr, 96, true) end
+    if type(DisabledInfoStr) == "string" then DisabledInfoStr = self:CompactText(DisabledInfoStr, 96, true) end
     local TooltipTable = {
         Disabled = false,
         Hovering = false,
@@ -3984,7 +4129,7 @@ do
             end
 
             if SlideBackTween then
-                SlideForwardTween(SlideBackTween, true)
+                StopTween(SlideBackTween, true)
                 SlideBackTween = nil
             end
         end
@@ -4886,8 +5031,6 @@ do
             Parent = ContentHolder,
         })
 
-        Library:MakeCover(BottomBackground, "Top")
-
         --// Footer \\--
         local FooterHeight = Library.IsMobile and 30 or 22
 
@@ -4908,6 +5051,7 @@ do
                 Parent = FooterBackground,
             })
         )
+        Library:MakeCover(FooterBackground, "Top")
         Library:MakeLine(FooterBackground, {
             Position = UDim2.fromScale(0, 0),
             Size = UDim2.new(1, 0, 0, 1),
@@ -5796,7 +5940,12 @@ do
             Data.Idx = select(3, ...) or nil
         end
 
+        local IsStatusLabel = Library:IsAutomationStatus(Data.Text)
         local function FormatSemanticLabelText(Value)
+            if IsStatusLabel or Library:IsAutomationStatus(Value) then
+                IsStatusLabel = true
+                return Library:FormatAutomationStatus(Value)
+            end
             if type(ZanjiColorizeSemanticText) == "function" then
                 local ok, formatted = pcall(
                     ZanjiColorizeSemanticText,
@@ -5826,7 +5975,7 @@ do
             Text = Data.Text,
             DoesWrap = Data.DoesWrap,
             CenterVertically = Data.CenterVertically == true,
-            IsDivider = tostring(Data.Text or ""):match("^%s*[─━%-%_]+%s*$") ~= nil,
+            IsDivider = Library:IsDividerText(Data.Text),
 
             Addons = Addons,
 
@@ -5928,7 +6077,9 @@ do
         end
 
         function Label:SetText(Text: string)
+            if Label.Destroyed or Groupbox.Destroyed or Library.Unloaded then return end
             local DisplayText = FormatSemanticLabelText(Text)
+            if Label.Text == DisplayText then return end
             Label.Text = DisplayText
             TextLabel.Text = Label.IsDivider and "" or DisplayText
 
@@ -6050,7 +6201,7 @@ do
 
                 Info.Risky = Params.Risky or false
                 Info.Disabled = Params.Disabled or false
-                Info.Visible = Params.Visible or true
+                Info.Visible = Params.Visible ~= false
                 Info.Idx = typeof(Second) == "table" and First or nil
             else
                 Info.Text = First or ""
@@ -7212,7 +7363,7 @@ do
             Numeric = Info.Numeric,
             -- Mobile keyboards should edit the existing value, not erase it on focus.
             -- Keep the original desktop behavior for controls that intentionally request clear-on-focus.
-            ClearTextOnFocus = Library.IsMobile and false or Info.ClearTextOnFocus,
+            ClearTextOnFocus = not Library.IsMobile and Info.ClearTextOnFocus,
             ClearTextOnBlur = Info.ClearTextOnBlur,
             Placeholder = Info.Placeholder,
             AllowEmpty = Info.AllowEmpty,
@@ -14443,12 +14594,8 @@ function Library:Notify(...)
     local Data = {}
     local Info = select(1, ...)
 
-    local function CompactNotifyText(value)
-        local text = tostring(value or "")
-            :gsub("<[^>]->", "")
-            :gsub("%s+", " ")
-            :gsub("^%s+", "")
-            :gsub("%s+$", "")
+    local function CompactNotifyText(value, limit)
+        local text = Library:CompactText(value, limit)
         return text ~= "" and text or nil
     end
 
@@ -15777,6 +15924,7 @@ function Library:CreateWindow(WindowInfo)
         end
     end
 
+    local ZanjiAutoFitSidebarToTabName
     function Window:FitSidebarToTabName(Name)
         ZanjiAutoFitSidebarToTabName(
             Name
@@ -15792,7 +15940,7 @@ function Library:CreateWindow(WindowInfo)
         end
 
         CurrentTabLabel.Text = Name
-        CurrentTabDescription.Text = Description
+        CurrentTabDescription.Text = Library:CompactText(Description, 82, true)
 
         if IsDefaultSearchbarSize then
             SearchBox.Size = UDim2.fromScale(0.5, 1)
@@ -15807,7 +15955,7 @@ function Library:CreateWindow(WindowInfo)
         end
     end
 
-    local function ZanjiAutoFitSidebarToTabName(TabName)
+    ZanjiAutoFitSidebarToTabName = function(TabName)
         if IsCompact then
             return
         end
@@ -16800,7 +16948,7 @@ function Library:CreateWindow(WindowInfo)
                     AutomaticSize = Enum.AutomaticSize.None,
                     BackgroundTransparency = 1,
                     Size = UDim2.new(1, 0, 0, Library.IsMobile and 12 or 14),
-                    Text = Info.Description or "",
+                    Text = Library:CompactText(Info.Description, 82, true),
                     TextColor3 = LayeredStyle.SecondaryText,
                     TextSize = Library.IsMobile and 10 or 11,
                     TextTransparency = 0.12,
@@ -16978,7 +17126,7 @@ function Library:CreateWindow(WindowInfo)
             end)
 
             function Groupbox:SetDescription(Description: string | nil)
-                GroupboxDescription.Text = Description or ""
+                GroupboxDescription.Text = Library:CompactText(Description, 82, true)
                 GroupboxDescription.Visible = (Description ~= nil)
                 local HasDescription = Description ~= nil
                 GroupboxTop.AutomaticSize = HasDescription
@@ -19383,6 +19531,7 @@ Library:GiveSignal(Teams.ChildRemoved:Connect(OnTeamChange))
 
 function Library:Unload()
     Library.Unloaded = true
+    Library:SetStartupScheduler(nil)
 
     --// Disconnect connections
     for Index = #Library.Signals, 1, -1 do
@@ -19471,7 +19620,7 @@ function Library:Unload()
 end
 
 getgenv().Library = Library
-Library.ZanjiBuild = "2026-11-21-v13-native-ui-controls"
+Library.ZanjiBuild = "2026-11-22-v14-shared-presentation"
 Library.UIHost = "PlayerGui"
 pcall(function() print("[ZANJI UI] Library build: V13 native controls") end)
 
