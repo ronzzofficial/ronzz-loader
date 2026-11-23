@@ -3853,6 +3853,246 @@ function Library:OnUnload(Callback)
     table.insert(Library.UnloadSignals, Callback)
 end
 
+-- BEGIN COMPACT GAME NOTIFICATIONS
+function Library:CreateCompactGameNotifications(playerGui, isCurrent)
+    local owner = self
+    local previous = owner._CompactGameNotificationsController
+    if previous and type(previous.Stop) == "function" then
+        previous:Stop()
+    end
+
+    local controller = { Active = true, Stopped = false, Connections = {} }
+    local styled, watched = {}, {}
+    local stackSuffix = "%[X(%d+)%]%s*$"
+    local stackColor = Color3.fromRGB(255, 220, 50)
+    local stackPending, merging = false, false
+    local queueStackCheck
+    owner._CompactGameNotificationsController = controller
+
+    local function connect(signal, callback)
+        local connection = signal:Connect(callback)
+        controller.Connections[connection] = true
+        return connection
+    end
+
+    local function disconnect(connection)
+        if connection then
+            controller.Connections[connection] = nil
+            pcall(function() connection:Disconnect() end)
+        end
+    end
+
+    local function restoreStyle(instance)
+        local state = styled[instance]
+        if state then
+            styled[instance] = nil
+            disconnect(state.Connection)
+            for property, saved in pairs(state.Properties) do
+                pcall(function()
+                    if instance[property] == saved.Compact then
+                        instance[property] = saved.Original
+                    end
+                end)
+            end
+        end
+        local connections = watched[instance]
+        if connections then
+            watched[instance] = nil
+            for _, connection in ipairs(connections) do disconnect(connection) end
+        end
+    end
+
+    function controller:Stop()
+        if self.Stopped then return end
+        self.Stopped = true
+        self.Active = false
+        stackPending = false
+        for connection in pairs(self.Connections) do disconnect(connection) end
+        for instance in pairs(styled) do restoreStyle(instance) end
+        table.clear(watched)
+        if owner._CompactGameNotificationsController == self then
+            owner._CompactGameNotificationsController = nil
+        end
+    end
+
+    local function live()
+        if not controller.Active then controller:Stop() return false end
+        local current = owner.Unloaded ~= true and owner._CompactGameNotificationsController == controller
+        if current and type(isCurrent) == "function" then
+            local ok, result = pcall(isCurrent)
+            current = ok and result == true
+        end
+        if not current then controller:Stop() end
+        return current
+    end
+
+    local frameStyle = {
+        Size = function(size) return UDim2.new(size.X.Scale, size.X.Offset, 0, 28) end,
+    }
+    local labelStyle = {
+        Size = function(size) return UDim2.new(size.X.Scale, size.X.Offset, 0, 24) end,
+        TextSize = 14,
+        TextScaled = false,
+        TextStrokeTransparency = 0.5,
+        TextStrokeColor3 = Color3.fromRGB(0, 0, 0),
+        TextColor3 = function(color, label)
+            return label.Text:match(stackSuffix) and stackColor or color
+        end,
+    }
+    local paddingStyle = { PaddingTop = UDim.new(0, 2), PaddingBottom = UDim.new(0, 2) }
+    local iconStyle = { ImageTransparency = 1, BackgroundTransparency = 1 }
+
+    local function applyStyle(instance, rules)
+        if not instance or styled[instance] or not live() then return end
+        local state = { Properties = {}, Writing = false }
+        styled[instance] = state
+        local function update(property)
+            local rule = rules[property]
+            if rule == nil then return end
+            local current = instance[property]
+            local saved = state.Properties[property]
+            if not saved then
+                saved = { Original = current }
+                state.Properties[property] = saved
+            elseif current ~= saved.Compact then
+                saved.Original = current
+            end
+            local compact = type(rule) == "function" and rule(saved.Original, instance) or rule
+            saved.Compact = compact
+            if current ~= compact then
+                state.Writing = true
+                instance[property] = compact
+                state.Writing = false
+            end
+        end
+        state.Connection = connect(instance.Changed, function(property)
+            if state.Writing or styled[instance] ~= state or not live() then return end
+            update(property == "Text" and "TextColor3" or property)
+            if property == "Text" and queueStackCheck then queueStackCheck() end
+        end)
+        for property in pairs(rules) do update(property) end
+    end
+
+    local function findList()
+        local gui = playerGui and playerGui:FindFirstChild("Top_Notification")
+        return gui and gui:FindFirstChild("Frame")
+    end
+
+    local function findLabel(frame)
+        if frame:IsA("Frame") then
+            local label = frame:FindFirstChild("TextLabel")
+            if label and label:IsA("TextLabel") then return label end
+        end
+    end
+
+    local function styleNotification(frame)
+        if not live() or not frame:IsA("Frame") then return end
+        if not watched[frame] then
+            watched[frame] = { connect(frame:GetAttributeChangedSignal("OG"), function()
+                if live() then queueStackCheck() end
+            end) }
+        end
+        local label = findLabel(frame)
+        if not label then return end
+        applyStyle(frame, frameStyle)
+        applyStyle(label, labelStyle)
+        applyStyle(frame:FindFirstChildOfClass("UIPadding"), paddingStyle)
+        applyStyle(frame:FindFirstChildOfClass("ImageLabel"), iconStyle)
+        local counter = frame:FindFirstChild("VAL_OBJ")
+        if counter and (counter:IsA("IntValue") or counter:IsA("NumberValue")) and not watched[counter] then
+            watched[counter] = { connect(counter.Changed, function()
+                if live() then queueStackCheck() end
+            end) }
+        end
+    end
+
+    local function mergeDuplicates(list)
+        local messages = {}
+        for _, frame in ipairs(list:GetChildren()) do
+            local label = findLabel(frame)
+            local message = label and frame:GetAttribute("OG")
+            if type(message) == "string" and message ~= "" then
+                local counter = frame:FindFirstChild("VAL_OBJ")
+                if counter and not (counter:IsA("IntValue") or counter:IsA("NumberValue")) then counter = nil end
+                local count = math.max(1, tonumber(label.Text:match(stackSuffix)) or 1, counter and counter.Value or 1)
+                local kept = messages[message]
+                if kept then
+                    kept.Count += count
+                    table.insert(kept.Duplicates, frame)
+                else
+                    messages[message] = { Frame = frame, Label = label, Counter = counter, Count = count, Duplicates = {} }
+                end
+            end
+        end
+        for message, kept in pairs(messages) do
+            if not live() then return end
+            if #kept.Duplicates > 0 then
+                local text = kept.Label.Text:gsub("%s*" .. stackSuffix, "")
+                if text == "" then text = message end
+                if kept.Counter then kept.Counter.Value = kept.Count end
+                kept.Label.Text = text .. " [X" .. kept.Count .. "]"
+                kept.Frame:SetAttribute("NotificationTimer", 3.5)
+                for _, duplicate in ipairs(kept.Duplicates) do duplicate:Destroy() end
+            end
+        end
+    end
+
+    queueStackCheck = function()
+        if merging or stackPending or not live() then return end
+        stackPending = true
+        -- Run once after the game has initialized the entry and native stack counter.
+        task.delay(0, function()
+            if not live() then return end
+            stackPending = false
+            local list = findList()
+            if list then
+                merging = true
+                mergeDuplicates(list)
+                merging = false
+            end
+        end)
+    end
+
+    local function styleList(list)
+        for _, frame in ipairs(list:GetChildren()) do styleNotification(frame) end
+        queueStackCheck()
+    end
+
+    if not owner._CompactGameNotificationsUnloadRegistered then
+        owner._CompactGameNotificationsUnloadRegistered = true
+        owner:OnUnload(function()
+            local active = owner._CompactGameNotificationsController
+            if active then active:Stop() end
+        end)
+    end
+    if not playerGui or not live() then
+        controller:Stop()
+        return controller
+    end
+    connect(playerGui.DescendantAdded, function(instance)
+        if not live() then return end
+        local list = findList()
+        if not list then return end
+        local parent = instance.Parent
+        if instance == list or instance == list.Parent then
+            styleList(list)
+        elseif parent == list then
+            styleNotification(instance)
+            queueStackCheck()
+        elseif parent and parent.Parent == list then
+            styleNotification(parent)
+            queueStackCheck()
+        end
+    end)
+    connect(playerGui.DescendantRemoving, function(instance)
+        restoreStyle(instance)
+    end)
+    local list = findList()
+    if list then styleList(list) end
+    return controller
+end
+-- END COMPACT GAME NOTIFICATIONS
+
 local CheckIcon, ArrowIcon, ResizeIcon, KeyIcon, MoveIcon
 function Library:SetIconModule(module: IconModule)
     FetchIcons = true
@@ -19620,7 +19860,7 @@ function Library:Unload()
 end
 
 getgenv().Library = Library
-Library.ZanjiBuild = "2026-11-22-v14-shared-presentation"
+Library.ZanjiBuild = "2026-11-23-compact-notifications"
 Library.UIHost = "PlayerGui"
 pcall(function() print("[ZANJI UI] Library build: V13 native controls") end)
 
