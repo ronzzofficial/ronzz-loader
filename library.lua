@@ -344,6 +344,7 @@ Library.LayeredStyle = LayeredStyle
 -- BEGIN ZANJI SHARED PRESENTATION
 -- Pure, bounded display helpers used by all five groups and the live HUD.
 Library.ZanjiPresentationVersion = 1
+Library.ZanjiPresentationBuild = "2026-11-24-short-status"
 function Library:CompactText(value, limit, firstSentence)
     local text = tostring(value or ""):gsub("<[^>]->", "")
         :gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
@@ -396,7 +397,62 @@ function Library:IsDividerText(value)
     local text = tostring(value or ""):gsub("%s+", "")
     return text ~= "" and text:gsub("─", ""):gsub("━", ""):gsub("[-_]", "") == ""
 end
-function Library:ResolveAutomationStatus(value, enabled)
+function Library:FormatAutomationClock(seconds)
+    seconds = tonumber(seconds) or 0
+    if seconds ~= seconds or math.abs(seconds) > 9007199254740991 then seconds = 0 end
+    seconds = math.max(0, math.ceil(seconds))
+    local hours = math.floor(seconds / 3600)
+    local minutes = math.floor(seconds / 60) % 60
+    local remainder = seconds % 60
+    if hours > 0 then return string.format("%02d:%02d:%02d", hours, minutes, remainder) end
+    return string.format("%02d:%02d", minutes, remainder)
+end
+
+function Library:NormalizeAutomationClocks(value)
+    local text = self:CompactText(value, 10000)
+    local function identified(first)
+        return text:sub(first-1,first-1):match("[%w_/.#%-]") ~= nil
+    end
+    text = text:gsub("()(%d+)%s*[hH]%s*(%d+)%s*[mM]%s*(%d+)%s*[sS]%f[%A]()", function(first,h,m,s,last)
+        if identified(first) then return text:sub(first,last-1) end
+        return self:FormatAutomationClock(tonumber(h)*3600 + tonumber(m)*60 + tonumber(s))
+    end)
+    text = text:gsub("()(%d+)%s*[hH]%s*(%d+)%s*[mM]%f[%A]()", function(first,h,m,last)
+        if identified(first) then return text:sub(first,last-1) end
+        return self:FormatAutomationClock(tonumber(h)*3600 + tonumber(m)*60)
+    end)
+    text = text:gsub("()(%d+)%s*[mM]%s*(%d+)%s*[sS]%f[%A]()", function(first,m,s,last)
+        if identified(first) then return text:sub(first,last-1) end
+        return self:FormatAutomationClock(tonumber(m)*60 + tonumber(s))
+    end)
+    local lower = text:lower()
+    local timed = lower:find("cooldown",1,true) or lower:find("remaining",1,true)
+        or lower:find("next ",1,true) or lower:find("retry",1,true) or lower:find("feed in",1,true)
+    text = text:gsub("()(%d+%.?%d*)%s*(%a+)()", function(first, number, unit, last)
+        local before = text:sub(first-1, first-1)
+        local original = text:sub(first, last-1)
+        if before:match("[%w_/.#%-]") then return original end
+        unit = unit:lower()
+        local multiplier = (unit == "s" or unit == "sec" or unit == "secs" or unit == "second" or unit == "seconds") and 1
+            or timed and (unit == "m" or unit == "min" or unit == "mins" or unit == "minutes") and 60
+            or timed and (unit == "h" or unit == "hr" or unit == "hours") and 3600
+        return multiplier and self:FormatAutomationClock(tonumber(number)*multiplier) or original
+    end)
+    -- Protect hours before normalizing minute clocks, avoiding partial matches.
+    local clocks = {}
+    local function clock(seconds)
+        clocks[#clocks+1] = self:FormatAutomationClock(seconds)
+        return "\1" .. #clocks .. "\2"
+    end
+    text = text:gsub("(%d+):(%d%d):(%d%d)", function(h,m,s) return clock(tonumber(h)*3600+tonumber(m)*60+tonumber(s)) end)
+        :gsub("(%d+):(%d%d)", function(m,s) return clock(tonumber(m)*60+tonumber(s)) end)
+        :gsub("\1(%d+)\2", function(index) return clocks[tonumber(index)] end)
+    text = text:gsub("[Cc]ooldown%s*:%s*", "Cooldown ")
+        :gsub("[Nn]ext%s+[Hh]unt%s+[Ii]n%s+", "Next hunt ")
+    return text
+end
+
+function Library:ResolveAutomationStatus(value, enabled, preserveDetail)
     if enabled == false then return "Stopped", "Idle" end
     local text = tostring(value or ""):gsub("<[^>]->", "")
     text = text:gsub("^%s*Status:%s*", ""):gsub("[\r\n]+Info:%s*", " • ")
@@ -444,13 +500,13 @@ function Library:ResolveAutomationStatus(value, enabled)
         :gsub("PetMutationMachineService_RE", "Mutation Machine")
         :gsub("FireServer%(%)", ""):gsub("[Ww]ebhook", "notification")
         :gsub("[Ll]evel%s+(%d+)%s*/%s*(%d+)", "Age %1/%2")
-    if (utf8.len(detail) or 0) > 48 then
+    if not preserveDetail and (utf8.len(detail) or 0) > 48 then
         local age = detail:match("[Aa]ge%s+%d+%s*/%s*%d+")
         local kg = detail:match("[Kk][Gg]%s*[%d%.]+%s*/%s*[%d%.]+")
             or detail:match("[%d%.]+%s*/%s*[%d%.]+%s*[Kk][Gg]")
         if age or kg then detail = table.concat({age or "", kg or ""}, " • "):gsub("^ • ", ""):gsub(" • $", "") end
     end
-    detail = self:CompactText(detail, 48)
+    detail = self:CompactText(detail, preserveDetail and 10000 or 48)
     if detail == "" or detail:lower() == state:lower() or detail:lower() == "active and running" then
         detail = ({Running="Active", Waiting="Waiting", Paused="Paused", Starting="Starting",
             Stopping="Stopping", Done="Complete", Error="Check settings"})[state]
@@ -458,8 +514,96 @@ function Library:ResolveAutomationStatus(value, enabled)
     return state, detail
 end
 function Library:FormatAutomationStatus(value, enabled)
-    local state, detail = self:ResolveAutomationStatus(value, enabled)
+    local state, detail = self:ResolveAutomationStatus(value, enabled, true)
     local text = ZanjiStatusIcons[state] .. " " .. state
+    detail = self:NormalizeAutomationClocks(detail)
+    -- Remove repeated state wrappers without reclassifying explicit states.
+    while true do
+        local raw = ZanjiStripStatusIcon(detail)
+        local word, rest = raw:match("^(%a+)(.*)$")
+        local nextDetail = rest and (rest:match("^%s*•%s*(.*)$") or rest:match("^%s*[:%-]%s*(.*)$"))
+        if word and ZanjiStatusAliases[word:lower()] == state and nextDetail then detail = nextDetail else break end
+    end
+    if state == "Waiting" then detail = detail:gsub("^[Ww]aiting%s+for%s+", "") end
+    detail = detail:gsub("[Ss]elected%s+[Pp]et%s+[Dd]ata%s+[Ss]yncing", "Pet data syncing")
+        :gsub("[Aa]nother automation is using a pet team", "Pet team busy")
+        :gsub("[Oo]ther automation is active", "Automation busy")
+        :gsub("[Cc]hecking selected target pets", "Checking pets")
+    local budget = 44 - (utf8.len(text) or #text) - 3
+    if (utf8.len(detail) or #detail) > budget then
+        local tokens = {}
+        local function protect(pattern, priority, transform)
+            local from = 1
+            while true do
+                local first, last = detail:find(pattern, from)
+                if not first then break end
+                local overlap = false
+                for _, token in ipairs(tokens) do
+                    if first <= token.Last and last >= token.First then overlap = true; break end
+                end
+                if not overlap then
+                    local value = detail:sub(first,last)
+                    tokens[#tokens+1] = {First=first,Last=last,RawValue=value,Value=transform and transform(value) or value,Priority=priority}
+                end
+                from = last+1
+            end
+        end
+        protect("%d+:%d%d:%d%d", 1)
+        protect("%d+:%d%d", 1)
+        protect("[Aa]ge%s+%d+%s*/%s*%d+", 2)
+        protect("[Kk][Gg]%s*%d+%.?%d*%s*/%s*%d+%.?%d*", 2)
+        protect("%d+%.?%d*%s*/%s*%d+%.?%d*%s*[Kk][Gg]", 2)
+        protect("%d+%s*/%s*%d+", 2)
+        protect("[Pp]et%s+#%w+", 3)
+        protect("[Pp]et%s+[%w_%-]+", 3)
+        protect("[Ii][Dd]%s*[:#]%s*[%w_%-]+", 3)
+        local uuidPattern = "%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x"
+        protect(uuidPattern, 3)
+        for _, reason in ipairs({"rejected","unavailable","missing","failed","invalid"}) do
+            local first,last = detail:lower():find(reason,1,true)
+            if first then tokens[#tokens+1] = {First=first,Last=last,RawValue=detail:sub(first,last),Value=reason:sub(1,1):upper()..reason:sub(2),Priority=0}; break end
+        end
+        table.sort(tokens, function(a,b) return a.First < b.First end)
+        local protected = {}
+        for _, token in ipairs(tokens) do protected[#protected+1] = token.Value end
+        local separator = " • "
+        local suffix = table.concat(protected, separator)
+        if (utf8.len(suffix) or #suffix) > budget then
+            separator = " "
+            suffix = table.concat(protected, separator)
+        end
+        if (utf8.len(suffix) or #suffix) > budget then
+            -- A full UUID plus live progress cannot fit the display budget.
+            -- Keep both identifying ends instead of discarding the pet/timer.
+            protected = {}
+            for _, token in ipairs(tokens) do
+                if token.Priority == 3 then
+                    token.Value = token.Value:gsub(uuidPattern,function(id) return id:sub(1,8).."..."..id:sub(-4) end)
+                end
+                protected[#protected+1] = token.Value
+            end
+            suffix = table.concat(protected,separator)
+        end
+        if (utf8.len(suffix) or #suffix) > budget then
+            table.sort(tokens,function(a,b) return a.Priority==b.Priority and a.First<b.First or a.Priority<b.Priority end)
+            protected = {}
+            for _, token in ipairs(tokens) do
+                local candidate = table.concat(protected,separator) .. (#protected>0 and separator or "") .. token.Value
+                if (utf8.len(candidate) or #candidate) <= budget then protected[#protected+1] = token.Value end
+            end
+            suffix = table.concat(protected,separator)
+        end
+        if suffix ~= "" then
+            local context = detail
+            for _, token in ipairs(tokens) do
+                local escaped = token.RawValue:gsub("([^%w])", "%%%1")
+                context = context:gsub(escaped, "")
+            end
+            context = context:gsub("%s*•%s*", " "):gsub("^%s+", ""):gsub("%s+$", "")
+            local contextBudget = budget - (utf8.len(suffix) or #suffix) - 3
+            detail = context ~= "" and contextBudget >= 8 and (self:CompactText(context,contextBudget).." • "..suffix) or suffix
+        else detail = self:CompactText(detail,budget) end
+    end
     if detail ~= "Idle" and detail ~= "Active" and detail ~= "Complete"
         and detail:lower() ~= state:lower() then text ..= " • " .. detail end
     return text
